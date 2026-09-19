@@ -8,7 +8,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {CallAuction} from "./libraries/CallAuction.sol";
-import {IdentityRegistry} from "./IdentityRegistry.sol";
+import {IEligibilityOracle} from "./interfaces/IEligibilityOracle.sol";
 import {NAVOracle} from "./NAVOracle.sol";
 
 contract BatchAuctionMarket is Ownable2Step, ReentrancyGuard, Pausable {
@@ -35,7 +35,7 @@ contract BatchAuctionMarket is Ownable2Step, ReentrancyGuard, Pausable {
 
     IERC20 public immutable assetToken;
     IERC20 public immutable settlementToken;
-    IdentityRegistry public identityRegistry;
+    IEligibilityOracle public identityRegistry;
     NAVOracle public navOracle;
 
     uint64 public roundDuration;
@@ -90,14 +90,14 @@ contract BatchAuctionMarket is Ownable2Step, ReentrancyGuard, Pausable {
     ) Ownable(issuer) {
         assetToken = IERC20(_assetToken);
         settlementToken = IERC20(_settlementToken);
-        identityRegistry = IdentityRegistry(_identityRegistry);
+        identityRegistry = IEligibilityOracle(_identityRegistry);
         navOracle = NAVOracle(_navOracle);
         roundDuration = _roundDuration;
         navBandBps = _navBandBps;
     }
 
     function setIdentityRegistry(address registry) external onlyOwner {
-        identityRegistry = IdentityRegistry(registry);
+        identityRegistry = IEligibilityOracle(registry);
         emit IdentityRegistryUpdated(registry);
     }
 

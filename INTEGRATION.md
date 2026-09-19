@@ -59,7 +59,7 @@ polling `RoundSettled`/`OrderSubmitted` events directly with viem is fine.
 | Yield, yield mechanism | `config/markets.json` — not modeled on-chain |
 | Primary redemption fee | `config/markets.json`, or read from the token if the issuer's mint/burn path charges one (Agora's `PermissionedAssetToken` doesn't by default) |
 | Liquidity | same as Markets page |
-| Eligibility label | whether `IdentityRegistry.isEligible(connectedAddress)` is true; the label text itself ("Institutional Investor") is `config/markets.json`, not derivable on-chain |
+| Eligibility label | whether `BatchAuctionMarket.identityRegistry().isEligible(connectedAddress)` is true — the eligibility source is a market-level choice (`IdentityRegistry` for KYC, or `SolvencyPool` for a ZK-proven capital threshold with no identity check), so read the label off the market's actual configured contract, not an assumed one. The label text itself ("Institutional Investor") is `config/markets.json`, not derivable on-chain |
 | "NEXT EVENT" halt scheduling | not implemented — `BatchAuctionMarket.pause()` is immediate and issuer-triggered, not a scheduled calendar window. Skip this element or build it as pure frontend copy until a scheduled-pause feature exists |
 | The order ticket itself | `BatchAuctionMarket.submitOrder(isBuy, price, qty)`, gated by `IdentityRegistry.isEligible`. Show `roundCloseAt()` as a countdown. After it closes, the order is pending until someone calls `settleRound()` (frontend can call it directly, permissionless) |
 | Order result | read the order back via `orders(orderId)` — `settled == true` means resolved; compare `qty` before/after or read the `BuyOrderSettled`/`SellOrderSettled` event for exact filled/refund amounts |

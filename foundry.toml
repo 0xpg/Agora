@@ -2,7 +2,11 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+fs_permissions = [{ access = "read", path = "test/fixtures/solvency" }]
 
 [invariant]
 runs = 256
 depth = 100
+
+[fmt]
+ignore = ["src/SolvencyVerifier.sol"]

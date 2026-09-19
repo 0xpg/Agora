@@ -74,6 +74,46 @@ a compliance status change must not trap already-owned funds. See
 from the eligibility check on both sides of a transfer so escrow and refunds
 always move freely between the market and an investor's own wallet.
 
+## Permissionless eligibility via proof of assets
+
+`IdentityRegistry` is one implementation of `IEligibilityOracle`
+(`isEligible(address) → bool`) — `BatchAuctionMarket` is wired to the interface,
+not the concrete contract, so a market can point at a different eligibility
+source entirely. [`SolvencyPool`](src/SolvencyPool.sol) is a second
+implementation with no identity check at all: eligibility is proven by
+possession of capital, not by who you are.
+
+A trader deposits into a shared pool and receives a private commitment (a
+secret they hold, never submitted on-chain) recorded as a leaf in an
+on-chain Merkle tree. To trade, they submit a zero-knowledge proof — verified
+by [`circuits/solvency`](circuits/solvency), a Noir circuit compiled to a
+real on-chain verifier via Barretenberg (`src/SolvencyVerifier.sol`, checked
+in as generated, not hand-written) — that they know a secret behind some leaf
+in the tree worth at least the market's configured threshold, without
+revealing which leaf. The trading address is a public input the proof is
+bound to, so it can't be replayed under a different address; a nullifier
+derived from the same secret and the current epoch is public too, so one
+deposit can authorize at most one trading address per epoch, but the *same*
+depositor can keep re-proving every epoch without spending the underlying
+deposit. Eligibility expires automatically at the epoch boundary and has to
+be re-proven — there is no separate revocation path to maintain.
+
+This gets you the accreditation half of "know your customer" — proof of
+sufficient capital at risk — without an identity check, and without
+exposing which specific deposit backs a given trader. It does not get you
+the other half: nothing here screens for sanctioned or prohibited persons,
+because nothing here learns who anyone is. A market that needs both would
+require `IdentityRegistry` *and* `SolvencyPool` results, not choose one.
+
+`test/SolvencyVerifierIntegration.t.sol` deposits into a live `SolvencyPool`,
+checks the resulting on-chain root matches what the circuit expects for that
+exact deposit, then verifies a real proof (checked in under
+`test/fixtures/solvency/`) against it — end to end, no mocked verifier. Withdrawal
+isn't implemented yet: a deposit is currently a one-way trading bond, not
+freely liquid — see the circuit's own tests
+(`circuits/solvency/src/main.nr`) for the threshold and replay-protection
+properties proven independently of any Solidity integration.
+
 ## Fund conservation
 
 `test/invariant/BatchAuctionMarket.invariant.t.sol` runs a handler through random
@@ -124,11 +164,18 @@ protecting (an automatic off-switch, not a precise liquidity metric).
 | Contract | Responsibility |
 |---|---|
 | `IdentityRegistry` | EAS-backed eligibility cache |
+| `SolvencyPool` | Deposit-and-ZK-prove eligibility cache, no identity involved |
+| `SolvencyVerifier` | Generated on-chain verifier for `circuits/solvency` (not hand-written) |
 | `PermissionedAssetToken` | ERC-20 tokenized security, transfer-gated on eligibility |
 | `NAVOracle` | Issuer-published reference price + staleness bound |
 | `CallAuction` (library) | Pure clearing algorithm: single or two-sided price, NAV-band gated |
 | `BatchAuctionMarket` | Order escrow, round lifecycle, settlement, pause |
 | `MarketFactory` + `src/factories/*` | Self-serve deployment of a full market set per issuer |
+
+`SolvencyVerifier` is a generated UltraHonk verifier and, like most of these,
+sits close to the EIP-170 limit on its own (24,290 of 24,576 bytes at time of
+writing) — a larger circuit would need Barretenberg's `--optimized` output or
+a library split, the same problem `MarketFactory` already had to solve below.
 
 `MarketFactory` orchestrates four small per-contract sub-factories rather than
 deploying everything via `new` directly: embedding all four contracts' creation
@@ -165,7 +212,20 @@ The `CallAuction` matching algorithm has both example-based and fuzz tests
 voided-round mutation-safety check; `test/BatchAuctionMarket.t.sol` covers a
 full round end-to-end, the eligibility edge cases above, pause behavior, and
 spread accumulation/withdrawal; `test/invariant/` covers fund conservation
-across randomized multi-round sequences (see above).
+across randomized multi-round sequences (see above), including designated-maker
+activity.
+
+`circuits/solvency` is a separate Noir package with its own test suite
+(`nargo test`, using [noirup](https://noirup.dev)/[bbup](https://barretenberg.aztec.network)
+to install `nargo`/`bb`) covering the threshold check, Merkle-inclusion check,
+and nullifier stability/uniqueness properties independently of Solidity.
+`src/SolvencyVerifier.sol` is generated from that circuit
+(`bb write_vk --oracle_hash keccak && bb write_solidity_verifier`) and checked
+in rather than built on the fly, since regenerating it needs the Noir/Barretenberg
+toolchain and CI only runs `forge`. `test/SolvencyVerifierIntegration.t.sol`
+exercises the checked-in verifier against a real proof fixture — regenerate
+both together if the circuit ever changes, or the two will silently stop
+matching each other.
 
 ## Deploy
 
@@ -192,9 +252,11 @@ function, only order submission into a round that settles later.
 This is a hackathon-stage scaffold: core matching, escrow, eligibility, and fund
 conservation are implemented and tested; NAV is issuer-set rather than pulled from
 a live feed; `MarketFactory` deploys full instances rather than minimal proxies;
-ownership is `Ownable2Step` but not yet multisig/timelock-gated. Candidate next
+ownership is `Ownable2Step` but not yet multisig/timelock-gated; `SolvencyPool`
+has no withdrawal path yet, so a deposit is currently one-way. Candidate next
 steps: a frontend (Base OnchainKit + Smart Wallet for gasless order submission),
 an indexer for round history (the per-order `BuyOrderSettled`/`SellOrderSettled`/
 `OrderExcludedIneligible` events are meant for this), Clones-based factory
-deploys, and an ATS-N-style disclosure tier once a market crosses a volume
-threshold.
+deploys, withdrawal from `SolvencyPool` via a second ZK proof (a spend
+nullifier alongside the existing per-epoch eligibility one), and an ATS-N-style
+disclosure tier once a market crosses a volume threshold.

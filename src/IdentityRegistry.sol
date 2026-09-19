@@ -4,8 +4,9 @@ pragma solidity ^0.8.24;
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IEAS, Attestation} from "./interfaces/IEAS.sol";
+import {IEligibilityOracle} from "./interfaces/IEligibilityOracle.sol";
 
-contract IdentityRegistry is Ownable2Step {
+contract IdentityRegistry is Ownable2Step, IEligibilityOracle {
     struct EligibilityRecord {
         bool eligible;
         uint64 validUntil;
@@ -76,7 +77,7 @@ contract IdentityRegistry is Ownable2Step {
         emit EligibilityRefreshed(investor, allValid, validUntil);
     }
 
-    function isEligible(address investor) public view returns (bool) {
+    function isEligible(address investor) public view override returns (bool) {
         EligibilityRecord memory r = eligibility[investor];
         return r.eligible && block.timestamp <= r.validUntil;
     }
