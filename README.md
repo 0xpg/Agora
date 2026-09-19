@@ -56,6 +56,24 @@ escrowed (a cancelled order, or the unmatched/leftover portion of a settled one)
 a compliance status change must not trap already-owned funds. See
 `PermissionedAssetToken.exemptOperators` and its NatSpec.
 
+## Fund conservation
+
+`test/invariant/BatchAuctionMarket.invariant.t.sol` runs a handler through random
+sequences of submit/cancel/settle/NAV-update/time-warp calls and checks, after
+every call, that the market's token balances exactly equal what's still owed to
+open orders — computed structurally from order state, not from a parallel
+ghost-accounting mirror that could hide the same bug twice. It caught a real bug
+during development: settling a round by summing each order's own
+`floor(price*qty/1e18)` independently can round differently on the buy side than
+the sell side even when both sides matched the same total quantity, because
+different order-size partitions of the same total round differently. `_settleBuys`
+computes each buy order's retained amount once and refunds by subtraction (exact
+against its own escrow by construction); `_settleSells` pays every filled order the
+standard per-order amount except the last, which absorbs whatever rounding
+remainder is left — so the round always settles exactly, never over- or
+under-paying. See the NatSpec on `_settleBuys`/`_settleSells` and the deterministic
+regression test in `BatchAuctionMarket.t.sol` for the exact numbers.
+
 ## Contracts
 
 | Contract | Responsibility |
@@ -64,12 +82,27 @@ a compliance status change must not trap already-owned funds. See
 | `PermissionedAssetToken` | ERC-20 tokenized security, transfer-gated on eligibility |
 | `NAVOracle` | Issuer-published reference price + staleness bound |
 | `CallAuction` (library) | Pure uniform-price clearing algorithm |
-| `BatchAuctionMarket` | Order escrow, round lifecycle, settlement |
+| `BatchAuctionMarket` | Order escrow, round lifecycle, settlement, pause |
 | `MarketFactory` + `src/factories/*` | Self-serve deployment of a full market set per issuer |
 
 `MarketFactory` orchestrates four small per-contract sub-factories rather than
 deploying everything via `new` directly — see its NatSpec for why (EIP-170's
 24,576-byte contract size limit).
+
+`IdentityRegistry`, `PermissionedAssetToken`, `NAVOracle`, and `BatchAuctionMarket`
+all use `Ownable2Step`, not plain `Ownable`: a bad `transferOwnership` call to an
+unreachable address would otherwise strand compliance admin, NAV updates, or
+trading entirely, not just convenience. This does not address a single owner key
+being compromised — for NAV in particular, that key can set an arbitrary clearing
+price — so a multisig or timelock in front of these contracts is the real
+production hardening step; this scaffold deliberately leaves that as a deployment
+choice rather than baking in one specific governance scheme.
+
+`BatchAuctionMarket` has an issuer-controlled `pause()`/`unpause()` for halts
+around distributions or corporate actions (the same real-world reason Theorem's
+own product has a pause switch). It only gates new activity — `startRound` and
+`submitOrder` — never `cancelOrder` or `settleRound`: a pause must not be able to
+trap funds already escrowed in an open round.
 
 ## Build & test
 
@@ -79,8 +112,10 @@ forge test -vv
 ```
 
 The `CallAuction` matching algorithm has both example-based and fuzz tests
-(`test/CallAuction.t.sol`); `test/BatchAuctionMarket.t.sol` covers a full
-round end-to-end plus the eligibility edge cases above.
+(`test/CallAuction.t.sol`); `test/BatchAuctionMarket.t.sol` covers a full round
+end-to-end, the eligibility edge cases above, pause behavior, a deterministic
+rounding regression, and a two-round sequence; `test/invariant/` covers fund
+conservation across randomized multi-round sequences (see above).
 
 ## Deploy
 
@@ -94,9 +129,12 @@ against current docs before deploying — see `.env.example`.
 
 ## Status / roadmap
 
-This is a hackathon-stage scaffold: core matching, escrow, and eligibility logic
-are implemented and tested; NAV is issuer-set rather than pulled from a live feed;
-`MarketFactory` deploys full instances rather than minimal proxies. Candidate next
+This is a hackathon-stage scaffold: core matching, escrow, eligibility, and fund
+conservation are implemented and tested; NAV is issuer-set rather than pulled from
+a live feed; `MarketFactory` deploys full instances rather than minimal proxies;
+ownership is `Ownable2Step` but not yet multisig/timelock-gated. Candidate next
 steps: a frontend (Base OnchainKit + Smart Wallet for gasless order submission),
-an indexer for round history, Clones-based factory deploys, and an ATS-N-style
-disclosure tier once a market crosses a volume threshold.
+an indexer for round history (the per-order `BuyOrderSettled`/`SellOrderSettled`/
+`OrderExcludedIneligible` events are meant for this), Clones-based factory
+deploys, and an ATS-N-style disclosure tier once a market crosses a volume
+threshold.

@@ -29,8 +29,16 @@ contract MarketFactoryTest is Test {
         vm.prank(issuer);
         (address token, address market,,) = factory.deployMarket("Agora Note", "AGN", 1 days, 1 hours, 500, 30 days);
 
-        assertEq(PermissionedAssetToken(token).owner(), issuer);
         assertTrue(PermissionedAssetToken(token).exemptOperators(market));
         assertEq(BatchAuctionMarket(market).owner(), issuer);
+
+        // Ownable2Step: ownership transfer is only proposed by the factory, not
+        // completed — the token stays factory-owned until the issuer accepts it.
+        assertEq(PermissionedAssetToken(token).owner(), address(factory));
+        assertEq(PermissionedAssetToken(token).pendingOwner(), issuer);
+
+        vm.prank(issuer);
+        PermissionedAssetToken(token).acceptOwnership();
+        assertEq(PermissionedAssetToken(token).owner(), issuer);
     }
 }

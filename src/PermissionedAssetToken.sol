@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 
@@ -9,7 +10,12 @@ import {IdentityRegistry} from "./IdentityRegistry.sol";
 /// both parties currently pass the IdentityRegistry eligibility check — the
 /// token-level enforcement gate (mirrors ERC-3643); BatchAuctionMarket adds a
 /// second, pool-level gate by re-checking eligibility again at settlement.
-contract PermissionedAssetToken is ERC20, Ownable {
+///
+/// Ownable2Step: see NAVOracle's NatSpec. Note MarketFactory relies on the
+/// two-step handoff being real — it deploys this contract owned by itself, wires
+/// the market's escrow exemption, calls transferOwnership(issuer), and the issuer
+/// only becomes owner once they call acceptOwnership() themselves.
+contract PermissionedAssetToken is ERC20, Ownable2Step {
     IdentityRegistry public identityRegistry;
 
     /// @notice Contracts (e.g. a BatchAuctionMarket) trusted to enforce eligibility

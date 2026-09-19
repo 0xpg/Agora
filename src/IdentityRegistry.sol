@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IEAS, Attestation} from "./interfaces/IEAS.sol";
 
@@ -11,7 +12,12 @@ import {IEAS, Attestation} from "./interfaces/IEAS.sol";
 /// re-verifies each one on-chain before caching a result. isEligible() is then a
 /// cheap view read for PermissionedAssetToken transfers and BatchAuctionMarket
 /// order submission/settlement.
-contract IdentityRegistry is Ownable {
+///
+/// Ownable2Step: the owner controls which attestation schemas/attesters count as
+/// eligibility, so a bricked transfer here would strand compliance admin, not just
+/// convenience — see NAVOracle's NatSpec for the same reasoning, including that
+/// this only rules out transfer-to-unreachable-address, not single-key compromise.
+contract IdentityRegistry is Ownable2Step {
     struct EligibilityRecord {
         bool eligible;
         uint64 validUntil;

@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {CallAuction} from "./libraries/CallAuction.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
@@ -14,7 +16,16 @@ import {NAVOracle} from "./NAVOracle.sol";
 /// on submission; a round closes on a timer; anyone can trigger settlement, which
 /// re-checks eligibility (not just at submit time — closes the "de-whitelisted
 /// mid-round" gap), matches via CallAuction, and pays out/refunds in one pass.
-contract BatchAuctionMarket is Ownable, ReentrancyGuard {
+///
+/// Ownable2Step: see NAVOracle's NatSpec for the same reasoning and its limits.
+///
+/// Pausable gates new trading activity — starting a round and submitting orders —
+/// for issuer-controlled halts around distributions or corporate actions, the
+/// real-world reason Theorem's own product has a pause switch. cancelOrder and
+/// settleRound are deliberately NOT gated by it: a pause must never be able to
+/// trap funds already escrowed in an open round, whether the investor wants it
+/// back individually (cancelOrder) or the round runs its course (settleRound).
+contract BatchAuctionMarket is Ownable2Step, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
     struct StoredOrder {
@@ -50,6 +61,11 @@ contract BatchAuctionMarket is Ownable, ReentrancyGuard {
     );
     event OrderCancelled(uint256 indexed orderId);
     event RoundSettled(uint256 indexed roundId, uint256 clearingPrice, uint256 matchedQty);
+    /// @dev Per-order settlement detail an indexer would otherwise have to
+    /// reconstruct by correlating ERC20 Transfer events back to orders by hand.
+    event BuyOrderSettled(uint256 indexed orderId, uint256 assetFilled, uint256 settlementRefunded);
+    event SellOrderSettled(uint256 indexed orderId, uint256 settlementProceeds, uint256 assetRefunded);
+    event OrderExcludedIneligible(uint256 indexed orderId, address indexed trader);
     event IdentityRegistryUpdated(address indexed registry);
     event NAVOracleUpdated(address indexed oracle);
     event RoundDurationUpdated(uint64 roundDuration);
@@ -100,13 +116,23 @@ contract BatchAuctionMarket is Ownable, ReentrancyGuard {
         emit NAVBandUpdated(_navBandBps);
     }
 
+    /// @notice Halts new trading activity (see contract NatSpec). Existing orders
+    /// remain cancellable throughout — a pause stops new activity, never withdrawals.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
     // ---------------------------------------------------------------------
     // Round lifecycle
     // ---------------------------------------------------------------------
 
     /// @notice Permissionless: anyone can open the next round once the previous one
     /// is settled and NAV is fresh, so market continuity never depends on the issuer.
-    function startRound() external {
+    function startRound() external whenNotPaused {
         require(currentRoundSettled, "previous round not settled");
         require(!navOracle.isStale(), "stale NAV");
 
@@ -118,7 +144,12 @@ contract BatchAuctionMarket is Ownable, ReentrancyGuard {
         emit RoundStarted(currentRoundId, roundOpenAt, roundCloseAt);
     }
 
-    function submitOrder(bool isBuy, uint256 price, uint256 qty) external nonReentrant returns (uint256 orderId) {
+    function submitOrder(bool isBuy, uint256 price, uint256 qty)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 orderId)
+    {
         require(!currentRoundSettled, "no open round");
         require(block.timestamp < roundCloseAt, "round closed");
         require(price > 0 && qty > 0, "price/qty=0");
@@ -170,11 +201,8 @@ contract BatchAuctionMarket is Ownable, ReentrancyGuard {
         uint256 roundId = currentRoundId;
         currentRoundSettled = true;
 
-        (CallAuction.Order[] memory buys, uint256[] memory eligibleBuyIds) = _loadEligibleOrders(buyOrderIds[roundId]);
-        (CallAuction.Order[] memory sells, uint256[] memory eligibleSellIds) =
-            _loadEligibleOrders(sellOrderIds[roundId]);
-        _refundIneligible(buyOrderIds[roundId], eligibleBuyIds, true);
-        _refundIneligible(sellOrderIds[roundId], eligibleSellIds, false);
+        CallAuction.Order[] memory buys = _loadEligibleAndRefundRest(buyOrderIds[roundId], true);
+        CallAuction.Order[] memory sells = _loadEligibleAndRefundRest(sellOrderIds[roundId], false);
 
         CallAuction.sortDescending(buys);
         CallAuction.sortAscending(sells);
@@ -182,8 +210,8 @@ contract BatchAuctionMarket is Ownable, ReentrancyGuard {
         (uint256 nav,) = navOracle.getNAV();
         CallAuction.Result memory result = CallAuction.clear(buys, sells, nav, navBandBps);
 
-        _settleSide(buys, true, result.clearingPrice);
-        _settleSide(sells, false, result.clearingPrice);
+        uint256 sellerPool = _settleBuys(buys, result.clearingPrice);
+        _settleSells(sells, result.clearingPrice, sellerPool);
 
         emit RoundSettled(roundId, result.clearingPrice, result.matchedQty);
     }
@@ -192,50 +220,30 @@ contract BatchAuctionMarket is Ownable, ReentrancyGuard {
     // Internal
     // ---------------------------------------------------------------------
 
-    function _loadEligibleOrders(uint256[] storage ids)
+    /// @dev Single O(n) pass: orders whose trader is currently eligible are
+    /// returned for matching; every other non-empty order is refunded immediately
+    /// and excluded. An earlier version filtered to the eligible subset first and
+    /// then re-scanned it per order to refund the rest — an O(n*m) nested search
+    /// that could make settleRound() exceed the block gas limit, permanently
+    /// stuck, on a round with enough orders. Classifying each order exactly once
+    /// removes that DoS surface entirely.
+    function _loadEligibleAndRefundRest(uint256[] storage ids, bool isBuy)
         private
-        view
-        returns (CallAuction.Order[] memory loaded, uint256[] memory eligibleIds)
+        returns (CallAuction.Order[] memory loaded)
     {
         uint256 n = ids.length;
         CallAuction.Order[] memory tmp = new CallAuction.Order[](n);
-        uint256[] memory tmpIds = new uint256[](n);
         uint256 count;
 
         for (uint256 i = 0; i < n; i++) {
             uint256 id = ids[i];
             StoredOrder storage o = orders[id];
-            if (o.qty > 0 && identityRegistry.isEligible(o.trader)) {
-                tmp[count] = CallAuction.Order({id: id, trader: o.trader, price: o.price, qty: o.qty});
-                tmpIds[count] = id;
-                count++;
-            }
-        }
-
-        loaded = new CallAuction.Order[](count);
-        eligibleIds = new uint256[](count);
-        for (uint256 i = 0; i < count; i++) {
-            loaded[i] = tmp[i];
-            eligibleIds[i] = tmpIds[i];
-        }
-    }
-
-    /// @dev Full refund for any order excluded from matching because its trader
-    /// failed the eligibility re-check at settlement time.
-    function _refundIneligible(uint256[] storage ids, uint256[] memory eligibleIds, bool isBuy) private {
-        for (uint256 i = 0; i < ids.length; i++) {
-            uint256 id = ids[i];
-            StoredOrder storage o = orders[id];
             if (o.qty == 0) continue;
 
-            bool eligible;
-            for (uint256 j = 0; j < eligibleIds.length; j++) {
-                if (eligibleIds[j] == id) {
-                    eligible = true;
-                    break;
-                }
+            if (identityRegistry.isEligible(o.trader)) {
+                tmp[count++] = CallAuction.Order({id: id, trader: o.trader, price: o.price, qty: o.qty});
+                continue;
             }
-            if (eligible) continue;
 
             uint256 qty = o.qty;
             o.qty = 0;
@@ -245,13 +253,65 @@ contract BatchAuctionMarket is Ownable, ReentrancyGuard {
             } else {
                 assetToken.safeTransfer(o.trader, qty);
             }
+            emit OrderExcludedIneligible(id, o.trader);
+        }
+
+        loaded = new CallAuction.Order[](count);
+        for (uint256 i = 0; i < count; i++) {
+            loaded[i] = tmp[i];
         }
     }
 
-    /// @dev Pays out the filled portion and refunds the unmatched remainder for
-    /// every order in `postClear`, whose `.qty` CallAuction.clear left holding the
-    /// unfilled remainder (0 if fully matched).
-    function _settleSide(CallAuction.Order[] memory postClear, bool isBuy, uint256 clearingPrice) private {
+    /// @dev Settles every buy order: delivers the filled asset-token amount, refunds
+    /// the rest of the escrow, and returns the total settlement token retained (not
+    /// refunded) across all of them — the exact pot sellers must be paid from.
+    /// Refund is escrow minus the retained portion, by subtraction, so each buy
+    /// order is exactly self-consistent (its own escrow, filled, and refund always
+    /// sum correctly) regardless of how price*qty/1e18 happens to round.
+    function _settleBuys(CallAuction.Order[] memory postClear, uint256 clearingPrice)
+        private
+        returns (uint256 sellerPool)
+    {
+        for (uint256 i = 0; i < postClear.length; i++) {
+            CallAuction.Order memory o = postClear[i];
+            StoredOrder storage stored = orders[o.id];
+            uint256 originalQty = stored.qty;
+            uint256 filled = originalQty - o.qty;
+            stored.qty = 0;
+            stored.settled = true;
+
+            if (filled > 0) {
+                assetToken.safeTransfer(o.trader, filled);
+            }
+            uint256 originalEscrow = (stored.price * originalQty) / PRICE_SCALE;
+            uint256 retained = (filled * clearingPrice) / PRICE_SCALE;
+            sellerPool += retained;
+            uint256 refund = originalEscrow - retained;
+            if (refund > 0) {
+                settlementToken.safeTransfer(o.trader, refund);
+            }
+            emit BuyOrderSettled(o.id, filled, refund);
+        }
+    }
+
+    /// @dev Settles every sell order: delivers proceeds for the filled portion and
+    /// refunds the unmatched remainder. Every filled order except the last one is
+    /// paid via the standard per-order formula (floor(filled*clearingPrice/1e18)),
+    /// which can individually round down by a fraction of a unit; the last filled
+    /// order is instead paid exactly `sellerPool` minus what's already been paid
+    /// out, absorbing the accumulated rounding remainder so the sum paid to sellers
+    /// always equals `sellerPool` exactly — not just in expectation. Distributing
+    /// each seller's own formula-computed share independently, with no such
+    /// reconciliation, can under-total sellerPool by up to (order count - 1) units
+    /// even though every individual order's math looks correct in isolation; that
+    /// gap would silently and permanently strand settlement token in the contract.
+    function _settleSells(CallAuction.Order[] memory postClear, uint256 clearingPrice, uint256 sellerPool) private {
+        uint256 lastFilledIndex = type(uint256).max;
+        for (uint256 i = 0; i < postClear.length; i++) {
+            if (orders[postClear[i].id].qty > postClear[i].qty) lastFilledIndex = i;
+        }
+
+        uint256 distributed;
         for (uint256 i = 0; i < postClear.length; i++) {
             CallAuction.Order memory o = postClear[i];
             StoredOrder storage stored = orders[o.id];
@@ -259,23 +319,18 @@ contract BatchAuctionMarket is Ownable, ReentrancyGuard {
             stored.qty = 0;
             stored.settled = true;
 
-            if (isBuy) {
-                if (filled > 0) {
-                    assetToken.safeTransfer(o.trader, filled);
-                }
-                uint256 refund =
-                    (filled * (stored.price - clearingPrice)) / PRICE_SCALE + (o.qty * stored.price) / PRICE_SCALE;
-                if (refund > 0) {
-                    settlementToken.safeTransfer(o.trader, refund);
-                }
-            } else {
-                if (filled > 0) {
-                    settlementToken.safeTransfer(o.trader, (filled * clearingPrice) / PRICE_SCALE);
-                }
-                if (o.qty > 0) {
-                    assetToken.safeTransfer(o.trader, o.qty);
+            uint256 proceeds;
+            if (filled > 0) {
+                proceeds = i == lastFilledIndex ? sellerPool - distributed : (filled * clearingPrice) / PRICE_SCALE;
+                distributed += proceeds;
+                if (proceeds > 0) {
+                    settlementToken.safeTransfer(o.trader, proceeds);
                 }
             }
+            if (o.qty > 0) {
+                assetToken.safeTransfer(o.trader, o.qty);
+            }
+            emit SellOrderSettled(o.id, proceeds, o.qty);
         }
     }
 }

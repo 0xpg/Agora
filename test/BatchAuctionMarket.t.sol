@@ -22,6 +22,7 @@ contract BatchAuctionMarketTest is Test {
     address issuer = makeAddr("issuer");
     address kycAttester = makeAddr("kycAttester");
     address buyer = makeAddr("buyer");
+    address buyer2 = makeAddr("buyer2");
     address seller = makeAddr("seller");
     address notWhitelisted = makeAddr("notWhitelisted");
 
@@ -170,5 +171,131 @@ contract BatchAuctionMarketTest is Test {
         vm.stopPrank();
 
         assertEq(usdc.balanceOf(buyer), balanceAfterSubmit + 200e18);
+    }
+
+    /// @notice Regression test for a real bug an invariant test found: summing each
+    /// buy order's own floor(price*qty/1e18) contribution and separately summing
+    /// each sell order's own floor(filled*clearingPrice/1e18) proceeds can disagree
+    /// by a few units even though both sides matched the same total quantity —
+    /// different order-size partitions of the same total round differently. With
+    /// two buy orders of qty 0.7e18 and 1.3e18 against one seller for 2e18 at this
+    /// clearing price, the naive per-order formulas would retain 2469135780246913577
+    /// from buyers but the naive seller-proceeds formula would try to pay out
+    /// 2469135780246913578 — one unit more than was ever collected. The fix pays the
+    /// last filled seller `sellerPool - alreadyDistributed` instead of its own
+    /// formula, so the round always settles exactly, with nothing left stranded.
+    function test_RoundingRemainderAcrossOrderPartitionsSettlesExactlyWithNoStrandedFunds() public {
+        uint256 clearingPrice = 1234567890123456789;
+        vm.prank(issuer);
+        navOracle.setNAV(clearingPrice);
+        _whitelist(buyer2);
+        usdc.mint(buyer2, 10_000e18);
+        vm.prank(buyer2);
+        usdc.approve(address(market), type(uint256).max);
+
+        market.startRound();
+        vm.prank(buyer);
+        market.submitOrder(true, clearingPrice, 7e17);
+        vm.prank(buyer2);
+        market.submitOrder(true, clearingPrice, 13e17);
+        vm.prank(seller);
+        market.submitOrder(false, clearingPrice, 2e18);
+
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+
+        // The seller can only ever receive what was actually retained from buyers'
+        // independently-floored escrow (sellerPool) — not floor(totalQty*price/1e18),
+        // which is 1 wei more here than the buy side ever collected. Paying that
+        // would mean creating a wei that was never escrowed.
+        uint256 expectedSellerProceeds = (7e17 * clearingPrice) / 1e18 + (13e17 * clearingPrice) / 1e18;
+        assertEq(expectedSellerProceeds, (2e18 * clearingPrice) / 1e18 - 1, "test fixture must exercise the gap");
+        assertEq(usdc.balanceOf(seller), expectedSellerProceeds);
+        assertEq(assetToken.balanceOf(buyer), 7e17);
+        assertEq(assetToken.balanceOf(buyer2), 13e17);
+        assertEq(usdc.balanceOf(address(market)), 0);
+        assertEq(assetToken.balanceOf(address(market)), 0);
+    }
+
+    function test_PauseBlocksStartRound() public {
+        vm.prank(issuer);
+        market.pause();
+
+        vm.expectRevert();
+        market.startRound();
+    }
+
+    function test_PauseBlocksNewOrdersButNotCancelOrSettle() public {
+        market.startRound();
+        vm.prank(buyer);
+        uint256 buyOrderId = market.submitOrder(true, 110e18, 5e18);
+        vm.prank(seller);
+        market.submitOrder(false, 90e18, 5e18);
+
+        vm.prank(issuer);
+        market.pause();
+
+        vm.prank(buyer);
+        vm.expectRevert();
+        market.submitOrder(true, 100e18, 1e18);
+
+        // an investor can still get their own escrowed funds back while paused
+        uint256 buyerBalanceBefore = usdc.balanceOf(buyer);
+        vm.prank(buyer);
+        market.cancelOrder(buyOrderId);
+        assertEq(usdc.balanceOf(buyer), buyerBalanceBefore + 550e18);
+
+        // an already-open round can still be settled while paused
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+        assertEq(assetToken.balanceOf(seller), 10e18); // seller's order refunded (no counterparty left)
+    }
+
+    function test_UnpauseRestoresNewActivity() public {
+        vm.startPrank(issuer);
+        market.pause();
+        market.unpause();
+        vm.stopPrank();
+
+        market.startRound();
+        vm.prank(buyer);
+        market.submitOrder(true, 100e18, 1e18);
+    }
+
+    function test_SecondRoundDoesNotSeeFirstRoundsOrdersOrIds() public {
+        market.startRound();
+        vm.prank(buyer);
+        uint256 round1OrderId = market.submitOrder(true, 110e18, 5e18);
+        vm.prank(seller);
+        market.submitOrder(false, 90e18, 5e18);
+
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+        assertEq(market.currentRoundId(), 1);
+        assertEq(assetToken.balanceOf(buyer), 5e18);
+
+        vm.prank(issuer);
+        assetToken.mint(seller, 3e18);
+        vm.prank(seller);
+        assetToken.approve(address(market), type(uint256).max);
+
+        market.startRound();
+        assertEq(market.currentRoundId(), 2);
+
+        // a fresh order in round 2 gets a fresh id, distinct from round 1's
+        vm.prank(seller);
+        uint256 round2OrderId = market.submitOrder(false, 90e18, 3e18);
+        assertTrue(round2OrderId != round1OrderId);
+
+        // round 1's already-settled order is untouched by round 2 settling
+        (,,,,, bool round1Settled) = market.orders(round1OrderId);
+        assertTrue(round1Settled);
+
+        // round 2 has no matching buy order, so it must fully refund, not match
+        // against anything left over from round 1
+        uint256 sellerBalanceBeforeSettle = assetToken.balanceOf(seller);
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+        assertEq(assetToken.balanceOf(seller), sellerBalanceBeforeSettle + 3e18); // refunded in full
     }
 }

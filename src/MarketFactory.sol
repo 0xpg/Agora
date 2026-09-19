@@ -64,7 +64,13 @@ contract MarketFactory {
         navOracle = navOracleFactory.deploy(msg.sender, navMaxStaleness);
 
         // Token is temporarily owned by this contract so it can wire the market's
-        // escrow exemption atomically, then hands ownership to the issuer below.
+        // escrow exemption atomically, then starts handing ownership to the issuer
+        // below. PermissionedAssetToken is Ownable2Step, so transferOwnership only
+        // proposes the issuer as pendingOwner here — the issuer must call
+        // acceptOwnership() themselves afterward to actually take ownership. Until
+        // then this contract remains the token's owner (registry/oracle/market
+        // ownership isn't affected: they're deployed already owned by msg.sender
+        // directly, with no handoff to accept).
         token = assetTokenFactory.deploy(name, symbol, address(this), identityRegistry);
         market = marketFactory.deploy(
             token, settlementToken, identityRegistry, navOracle, msg.sender, roundDuration, navBandBps

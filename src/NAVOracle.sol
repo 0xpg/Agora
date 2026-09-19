@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Issuer-published reference price for one tokenized asset, scaled 1e18
@@ -9,7 +10,15 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 /// so a simple owner-set value with a staleness bound is sufficient here; swap
 /// in a Chainlink/Pyth/RedStone feed behind the same interface for asset classes
 /// that have one (e.g. tokenized treasuries).
-contract NAVOracle is Ownable {
+///
+/// Ownable2Step rather than plain Ownable: since NAV directly drives the clearing
+/// price, a transfer to an unreachable address would be worse here than on a
+/// typical contract — two-step transfer at least rules out that specific failure
+/// mode. It does not address the deeper issue that a single compromised owner key
+/// can still set an arbitrary NAV; that needs a multisig or timelock in front of
+/// this contract, which this scaffold deliberately leaves as a deployment choice
+/// rather than baking in a specific governance scheme.
+contract NAVOracle is Ownable2Step {
     uint256 public nav;
     uint64 public updatedAt;
     uint64 public maxStaleness;
