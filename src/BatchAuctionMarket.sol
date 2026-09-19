@@ -23,6 +23,16 @@ contract BatchAuctionMarket is Ownable2Step, ReentrancyGuard, Pausable {
         bool settled;
     }
 
+    struct MakerProgram {
+        address maker;
+        uint256 maxSpreadBps;
+        uint256 rebatePerRound;
+        uint256 minOrganicOrdersPerSide;
+        uint256 graduationRounds;
+        uint256 consecutiveOrganicRounds;
+        bool active;
+    }
+
     IERC20 public immutable assetToken;
     IERC20 public immutable settlementToken;
     IdentityRegistry public identityRegistry;
@@ -55,9 +65,19 @@ contract BatchAuctionMarket is Ownable2Step, ReentrancyGuard, Pausable {
     event RoundDurationUpdated(uint64 roundDuration);
     event NAVBandUpdated(uint256 navBandBps);
     event SpreadWithdrawn(address indexed to, uint256 amount);
+    event MakerProgramSet(
+        address indexed maker,
+        uint256 maxSpreadBps,
+        uint256 rebatePerRound,
+        uint256 minOrganicOrdersPerSide,
+        uint256 graduationRounds
+    );
+    event MakerProgramGraduated(uint256 indexed roundId);
+    event MakerRebatePaid(uint256 indexed roundId, address indexed maker, uint256 amount);
 
     uint256 private constant PRICE_SCALE = 1e18;
     uint256 public accumulatedSpread;
+    MakerProgram public makerProgram;
 
     constructor(
         address _assetToken,
@@ -102,6 +122,29 @@ contract BatchAuctionMarket is Ownable2Step, ReentrancyGuard, Pausable {
         accumulatedSpread -= amount;
         settlementToken.safeTransfer(to, amount);
         emit SpreadWithdrawn(to, amount);
+    }
+
+    function setMakerProgram(
+        address maker,
+        uint256 maxSpreadBps,
+        uint256 rebatePerRound,
+        uint256 minOrganicOrdersPerSide,
+        uint256 graduationRounds
+    ) external onlyOwner {
+        if (maker != address(0)) {
+            require(maxSpreadBps > 0 && maxSpreadBps <= CallAuction.BPS_DENOMINATOR, "spread bps");
+            require(graduationRounds > 0, "graduationRounds=0");
+        }
+        makerProgram = MakerProgram({
+            maker: maker,
+            maxSpreadBps: maxSpreadBps,
+            rebatePerRound: rebatePerRound,
+            minOrganicOrdersPerSide: minOrganicOrdersPerSide,
+            graduationRounds: graduationRounds,
+            consecutiveOrganicRounds: 0,
+            active: maker != address(0)
+        });
+        emit MakerProgramSet(maker, maxSpreadBps, rebatePerRound, minOrganicOrdersPerSide, graduationRounds);
     }
 
     function pause() external onlyOwner {
@@ -196,6 +239,8 @@ contract BatchAuctionMarket is Ownable2Step, ReentrancyGuard, Pausable {
             accumulatedSpread = accumulatedSpread > shortfall ? accumulatedSpread - shortfall : 0;
         }
 
+        _settleMakerProgram(roundId);
+
         emit RoundSettled(roundId, result.buyPrice, result.sellPrice, result.matchedQty);
     }
 
@@ -275,5 +320,64 @@ contract BatchAuctionMarket is Ownable2Step, ReentrancyGuard, Pausable {
             }
             emit SellOrderSettled(o.id, proceeds, o.qty);
         }
+    }
+
+    function _settleMakerProgram(uint256 roundId) private {
+        if (!makerProgram.active) return;
+
+        (bool hasBuy, uint256 bestBuy, uint256 nonMakerBuys) = _makerSide(buyOrderIds[roundId], true);
+        (bool hasSell, uint256 bestSell, uint256 nonMakerSells) = _makerSide(sellOrderIds[roundId], false);
+
+        bool organic = nonMakerBuys >= makerProgram.minOrganicOrdersPerSide
+            && nonMakerSells >= makerProgram.minOrganicOrdersPerSide;
+        makerProgram.consecutiveOrganicRounds = organic ? makerProgram.consecutiveOrganicRounds + 1 : 0;
+
+        if (hasBuy && hasSell && _makerQuoteQualifies(bestBuy, bestSell)) {
+            _payMakerRebate(roundId);
+        }
+
+        if (makerProgram.consecutiveOrganicRounds >= makerProgram.graduationRounds) {
+            makerProgram.active = false;
+            emit MakerProgramGraduated(roundId);
+        }
+    }
+
+    function _makerSide(uint256[] storage ids, bool isBuy)
+        private
+        view
+        returns (bool has, uint256 best, uint256 nonMakerCount)
+    {
+        best = isBuy ? 0 : type(uint256).max;
+        for (uint256 i = 0; i < ids.length; i++) {
+            StoredOrder storage o = orders[ids[i]];
+            if (o.trader == makerProgram.maker) {
+                has = true;
+                if (isBuy ? o.price > best : o.price < best) {
+                    best = o.price;
+                }
+            } else {
+                nonMakerCount++;
+            }
+        }
+    }
+
+    function _makerQuoteQualifies(uint256 bestBuy, uint256 bestSell) private view returns (bool) {
+        if (bestSell < bestBuy) return false;
+        uint256 mid = (bestBuy + bestSell) / 2;
+        (uint256 nav,) = navOracle.getNAV();
+        uint256 bandLow = nav - (nav * navBandBps) / CallAuction.BPS_DENOMINATOR;
+        uint256 bandHigh = nav + (nav * navBandBps) / CallAuction.BPS_DENOMINATOR;
+        if (mid < bandLow || mid > bandHigh) return false;
+        uint256 spreadBps = ((bestSell - bestBuy) * CallAuction.BPS_DENOMINATOR) / mid;
+        return spreadBps <= makerProgram.maxSpreadBps;
+    }
+
+    function _payMakerRebate(uint256 roundId) private {
+        uint256 rebate =
+            accumulatedSpread < makerProgram.rebatePerRound ? accumulatedSpread : makerProgram.rebatePerRound;
+        if (rebate == 0) return;
+        accumulatedSpread -= rebate;
+        settlementToken.safeTransfer(makerProgram.maker, rebate);
+        emit MakerRebatePaid(roundId, makerProgram.maker, rebate);
     }
 }

@@ -42,6 +42,7 @@ price history — maps directly onto what's below.
 | Price chart | `RoundSettled` history as a step series, clearing price(s) vs NAV |
 | 30D volume, total liquidity across markets | aggregate over indexed events across all markets |
 | "5 of 6 open" | per market, whether `currentRoundSettled()` is false and `block.timestamp < roundCloseAt()` |
+| "Bootstrapping liquidity" badge | `makerProgram()` — `active == true` means a designated maker is currently subsidized on this market; show it as a temporary state, not a permanent liquidity guarantee |
 
 Liquidity and volume aren't single contract reads — pulling them live by
 replaying every order for every market on each page load doesn't scale. Stand up
@@ -63,6 +64,7 @@ polling `RoundSettled`/`OrderSubmitted` events directly with viem is fine.
 | The order ticket itself | `BatchAuctionMarket.submitOrder(isBuy, price, qty)`, gated by `IdentityRegistry.isEligible`. Show `roundCloseAt()` as a countdown. After it closes, the order is pending until someone calls `settleRound()` (frontend can call it directly, permissionless) |
 | Order result | read the order back via `orders(orderId)` — `settled == true` means resolved; compare `qty` before/after or read the `BuyOrderSettled`/`SellOrderSettled` event for exact filled/refund amounts |
 | Cancel | `BatchAuctionMarket.cancelOrder(orderId)`, only before `roundCloseAt()` |
+| Designated-maker rebate history | `MakerRebatePaid(roundId, maker, amount)` events; `MakerProgramGraduated(roundId)` marks when the subsidy turned itself off |
 
 ## Wiring it up
 

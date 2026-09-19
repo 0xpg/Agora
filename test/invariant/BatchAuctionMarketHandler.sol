@@ -14,6 +14,7 @@ contract BatchAuctionMarketHandler is Test {
     NAVOracle public navOracle;
     address public issuer;
     address[] public actors;
+    address public maker;
 
     constructor(
         BatchAuctionMarket _market,
@@ -21,7 +22,8 @@ contract BatchAuctionMarketHandler is Test {
         MockERC20 _usdc,
         NAVOracle _navOracle,
         address _issuer,
-        address[] memory _actors
+        address[] memory _actors,
+        address _maker
     ) {
         market = _market;
         token = _token;
@@ -29,6 +31,7 @@ contract BatchAuctionMarketHandler is Test {
         navOracle = _navOracle;
         issuer = _issuer;
         actors = _actors;
+        maker = _maker;
     }
 
     function submitOrder(uint256 actorSeed, bool isBuy, uint256 price, uint256 qty) external {
@@ -97,5 +100,47 @@ contract BatchAuctionMarketHandler is Test {
         uint256 amount = bound(amountSeed, 1, available);
         vm.prank(issuer);
         try market.withdrawSpread(issuer, amount) {} catch {}
+    }
+
+    function configureMakerProgram(
+        uint256 maxSpreadBpsSeed,
+        uint256 rebatePerRoundSeed,
+        uint256 minOrganicOrdersPerSideSeed,
+        uint256 graduationRoundsSeed
+    ) external {
+        uint256 maxSpreadBps = bound(maxSpreadBpsSeed, 100, 3_000);
+        uint256 rebatePerRound = bound(rebatePerRoundSeed, 0, 20e18);
+        uint256 minOrganicOrdersPerSide = bound(minOrganicOrdersPerSideSeed, 1, 3);
+        uint256 graduationRounds = bound(graduationRoundsSeed, 1, 4);
+        vm.prank(issuer);
+        market.setMakerProgram(maker, maxSpreadBps, rebatePerRound, minOrganicOrdersPerSide, graduationRounds);
+    }
+
+    function makerQuotes(uint256 midSeed, uint256 halfSpreadSeed, uint256 qtySeed) external {
+        if (market.currentRoundSettled()) {
+            try market.startRound() {}
+            catch {
+                return;
+            }
+        }
+        if (block.timestamp >= market.roundCloseAt()) return;
+
+        uint256 mid = bound(midSeed, 50e18, 200e18);
+        uint256 halfSpread = bound(halfSpreadSeed, 0, mid / 4);
+        uint256 qty = bound(qtySeed, 1e16, 20e18);
+        uint256 buyPrice = mid - halfSpread;
+        uint256 sellPrice = mid + halfSpread;
+
+        vm.startPrank(issuer);
+        usdc.mint(maker, (buyPrice * qty) / 1e18);
+        token.mint(maker, qty);
+        vm.stopPrank();
+
+        vm.startPrank(maker);
+        usdc.approve(address(market), type(uint256).max);
+        token.approve(address(market), type(uint256).max);
+        try market.submitOrder(true, buyPrice, qty) {} catch {}
+        try market.submitOrder(false, sellPrice, qty) {} catch {}
+        vm.stopPrank();
     }
 }

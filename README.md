@@ -95,6 +95,30 @@ many-tiny-orders cases — replaced with independent per-order computation
 `accumulatedSpread` tracker that only ever understates, never overstates, what's
 safely withdrawable.
 
+## Attracting liquidity to a new listing
+
+A fair clearing mechanism does not by itself get anyone to show up: a newly
+listed, thin market has no reason to expect a counterparty on the other side of
+any given round, and an empty book is a stable outcome, not a bug. `BatchAuctionMarket`
+now supports an optional, issuer-configured designated-maker program
+(`setMakerProgram`) to bridge that gap: an appointed maker who posts a
+qualifying two-sided quote — both a bid and an ask, within the issuer's NAV
+band and within a maximum spread — in a given round earns a flat rebate drawn
+from `accumulatedSpread`, regardless of whether their quote is ever filled.
+The rebate rewards presence, not execution, the same way exchange-run
+designated-market-maker programs work.
+
+The subsidy is bounded and self-terminating, not a standing entitlement:
+every round, the market counts how many non-maker orders exist on each side.
+Once that "organic" two-sided participation threshold is met for enough
+consecutive rounds (`graduationRounds`), the program deactivates itself
+permanently — no further rebates, no further quoting expectation — on the
+theory that a market real participants are already making two-sided doesn't
+need a subsidized quoter anymore. The organic count is a count of orders, not
+of distinct holders; a rigorous unique-participant count would need its own
+tracked set and was left out as unnecessary complexity for what the counter is
+protecting (an automatic off-switch, not a precise liquidity metric).
+
 ## Contracts
 
 | Contract | Responsibility |

@@ -151,6 +151,49 @@
   },
   {
     "type": "function",
+    "name": "makerProgram",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "maker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "maxSpreadBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "rebatePerRound",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minOrganicOrdersPerSide",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "graduationRounds",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "consecutiveOrganicRounds",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "navBandBps",
     "inputs": [],
     "outputs": [
@@ -363,6 +406,39 @@
   },
   {
     "type": "function",
+    "name": "setMakerProgram",
+    "inputs": [
+      {
+        "name": "maker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "maxSpreadBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "rebatePerRound",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minOrganicOrdersPerSide",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "graduationRounds",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setNAVBandBps",
     "inputs": [
       {
@@ -528,6 +604,81 @@
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MakerProgramGraduated",
+    "inputs": [
+      {
+        "name": "roundId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MakerProgramSet",
+    "inputs": [
+      {
+        "name": "maker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "maxSpreadBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "rebatePerRound",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "minOrganicOrdersPerSide",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "graduationRounds",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MakerRebatePaid",
+    "inputs": [
+      {
+        "name": "roundId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "maker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false

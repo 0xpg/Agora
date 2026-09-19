@@ -24,6 +24,7 @@ contract BatchAuctionMarketTest is Test {
     address buyer = makeAddr("buyer");
     address seller = makeAddr("seller");
     address notWhitelisted = makeAddr("notWhitelisted");
+    address maker = makeAddr("maker");
 
     function setUp() public {
         eas = new MockEAS();
@@ -49,15 +50,23 @@ contract BatchAuctionMarketTest is Test {
 
         _whitelist(buyer);
         _whitelist(seller);
+        _whitelist(maker);
 
-        vm.prank(issuer);
+        vm.startPrank(issuer);
         assetToken.mint(seller, 10e18);
         usdc.mint(buyer, 10_000e18);
+        assetToken.mint(maker, 5e18);
+        usdc.mint(maker, 5_000e18);
+        vm.stopPrank();
 
         vm.prank(seller);
         assetToken.approve(address(market), type(uint256).max);
         vm.prank(buyer);
         usdc.approve(address(market), type(uint256).max);
+        vm.startPrank(maker);
+        assetToken.approve(address(market), type(uint256).max);
+        usdc.approve(address(market), type(uint256).max);
+        vm.stopPrank();
     }
 
     function _whitelist(address investor) private {
@@ -259,5 +268,116 @@ contract BatchAuctionMarketTest is Test {
         vm.warp(block.timestamp + 1 hours);
         market.settleRound();
         assertEq(assetToken.balanceOf(seller), sellerBalanceBeforeSettle + 3e18);
+    }
+
+    function _fundSpreadPool() private {
+        market.startRound();
+        vm.prank(buyer);
+        market.submitOrder(true, 110e18, 5e18);
+        vm.prank(seller);
+        market.submitOrder(false, 90e18, 5e18);
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+    }
+
+    function test_MakerProgramPaysRebateForQualifyingQuote() public {
+        vm.prank(issuer);
+        market.setMakerProgram(maker, 1000, 10e18, 100, 5);
+
+        _fundSpreadPool();
+        assertEq(market.accumulatedSpread(), 100e18);
+
+        market.startRound();
+        vm.prank(maker);
+        market.submitOrder(true, 95e18, 1e18);
+        vm.prank(maker);
+        market.submitOrder(false, 105e18, 1e18);
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+
+        assertEq(usdc.balanceOf(maker), 5_000e18 + 10e18);
+        assertEq(assetToken.balanceOf(maker), 5e18);
+        assertEq(market.accumulatedSpread(), 90e18);
+
+        (,,,,, uint256 consecutiveOrganicRounds, bool active) = market.makerProgram();
+        assertEq(consecutiveOrganicRounds, 0);
+        assertTrue(active);
+    }
+
+    function test_MakerProgramSkipsRebateWhenSpreadTooWide() public {
+        vm.prank(issuer);
+        market.setMakerProgram(maker, 200, 10e18, 100, 5);
+
+        _fundSpreadPool();
+        assertEq(market.accumulatedSpread(), 100e18);
+
+        market.startRound();
+        vm.prank(maker);
+        market.submitOrder(true, 95e18, 1e18);
+        vm.prank(maker);
+        market.submitOrder(false, 105e18, 1e18);
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+
+        assertEq(usdc.balanceOf(maker), 5_000e18);
+        assertEq(market.accumulatedSpread(), 100e18);
+    }
+
+    function test_MakerProgramGraduatesAfterConsecutiveOrganicRounds() public {
+        _fundSpreadPool();
+        assertEq(market.accumulatedSpread(), 100e18);
+
+        vm.prank(issuer);
+        market.setMakerProgram(maker, 1000, 1e18, 1, 2);
+
+        vm.prank(issuer);
+        assetToken.mint(seller, 5e18);
+        market.startRound();
+        vm.prank(buyer);
+        market.submitOrder(true, 110e18, 5e18);
+        vm.prank(seller);
+        market.submitOrder(false, 90e18, 5e18);
+        vm.prank(maker);
+        market.submitOrder(true, 95e18, 1e18);
+        vm.prank(maker);
+        market.submitOrder(false, 105e18, 1e18);
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+
+        (,,,,, uint256 roundsAfterFirst, bool activeAfterFirst) = market.makerProgram();
+        assertEq(roundsAfterFirst, 1);
+        assertTrue(activeAfterFirst);
+        assertEq(market.accumulatedSpread(), 99e18);
+
+        vm.prank(issuer);
+        assetToken.mint(seller, 5e18);
+        market.startRound();
+        vm.prank(buyer);
+        market.submitOrder(true, 110e18, 5e18);
+        vm.prank(seller);
+        market.submitOrder(false, 90e18, 5e18);
+        vm.prank(maker);
+        market.submitOrder(true, 95e18, 1e18);
+        vm.prank(maker);
+        market.submitOrder(false, 105e18, 1e18);
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+
+        (,,,,, uint256 roundsAfterSecond, bool activeAfterSecond) = market.makerProgram();
+        assertEq(roundsAfterSecond, 2);
+        assertFalse(activeAfterSecond);
+        assertEq(market.accumulatedSpread(), 98e18);
+
+        vm.prank(issuer);
+        assetToken.mint(seller, 5e18);
+        market.startRound();
+        vm.prank(buyer);
+        market.submitOrder(true, 110e18, 5e18);
+        vm.prank(seller);
+        market.submitOrder(false, 90e18, 5e18);
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+
+        assertEq(market.accumulatedSpread(), 198e18);
     }
 }

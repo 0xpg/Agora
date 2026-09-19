@@ -56,7 +56,14 @@ contract BatchAuctionMarketInvariantTest is Test {
             registry.refreshEligibility(actors[i], uids);
         }
 
-        handler = new BatchAuctionMarketHandler(market, token, usdc, navOracle, issuer, actors);
+        address maker = makeAddr("maker");
+        bytes32 makerUid = keccak256(abi.encode("attestation", maker));
+        eas.register(makerUid, KYC_SCHEMA, maker, kycAttester, 0, 0);
+        bytes32[] memory makerUids = new bytes32[](1);
+        makerUids[0] = makerUid;
+        registry.refreshEligibility(maker, makerUids);
+
+        handler = new BatchAuctionMarketHandler(market, token, usdc, navOracle, issuer, actors, maker);
         targetContract(address(handler));
     }
 
