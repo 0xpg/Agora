@@ -6,26 +6,9 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IdentityRegistry} from "./IdentityRegistry.sol";
 
-/// @notice ERC-20 representing a tokenized security. Transfers are blocked unless
-/// both parties currently pass the IdentityRegistry eligibility check — the
-/// token-level enforcement gate (mirrors ERC-3643); BatchAuctionMarket adds a
-/// second, pool-level gate by re-checking eligibility again at settlement.
-///
-/// Ownable2Step: see NAVOracle's NatSpec. Note MarketFactory relies on the
-/// two-step handoff being real — it deploys this contract owned by itself, wires
-/// the market's escrow exemption, calls transferOwnership(issuer), and the issuer
-/// only becomes owner once they call acceptOwnership() themselves.
 contract PermissionedAssetToken is ERC20, Ownable2Step {
     IdentityRegistry public identityRegistry;
 
-    /// @notice Contracts (e.g. a BatchAuctionMarket) trusted to enforce eligibility
-    /// in their own logic before moving tokens. Any transfer touching an exempt
-    /// operator skips the token-level check on BOTH sides, not just the operator's:
-    /// an operator only ever (a) receives escrow from a sender it already checked,
-    /// (b) delivers matched proceeds to a recipient it already checked, or (c)
-    /// refunds an investor's own prior escrow — which must succeed even if that
-    /// investor has since become ineligible for *new* allocations (a status change
-    /// must not trap already-owned, already-escrowed funds).
     mapping(address => bool) public exemptOperators;
 
     event IdentityRegistryUpdated(address indexed registry);
@@ -48,8 +31,6 @@ contract PermissionedAssetToken is ERC20, Ownable2Step {
         emit ExemptOperatorUpdated(operator, exempt);
     }
 
-    /// @notice Primary issuance/redemption, controlled by the issuer. Secondary
-    /// trading happens exclusively through BatchAuctionMarket.
     function mint(address to, uint256 amount) external onlyOwner {
         _mint(to, amount);
     }

@@ -28,8 +28,6 @@ contract CallAuctionTest is Test {
         CallAuction.Order[] memory sells = new CallAuction.Order[](1);
         sells[0] = _order(2, 100e18, 5e18);
 
-        // NAV of 80 is far below the crossing interval [100, 105]; with a band wide
-        // enough to still reach the interval, the price should clamp to 100, not 80.
         CallAuction.Result memory r = CallAuction.clear(buys, sells, 80e18, 3000);
 
         assertEq(r.clearingPrice, 100e18);
@@ -55,7 +53,6 @@ contract CallAuctionTest is Test {
         CallAuction.Order[] memory sells = new CallAuction.Order[](1);
         sells[0] = _order(2, 140e18, 5e18);
 
-        // Crossing interval [140, 150] is far from NAV=100 even with a 5% band.
         CallAuction.Result memory r = CallAuction.clear(buys, sells, 100e18, 500);
 
         assertEq(r.matchedQty, 0);
@@ -79,13 +76,13 @@ contract CallAuctionTest is Test {
         buys[0] = _order(1, 100e18, 2e18);
         buys[1] = _order(2, 105e18, 2e18);
         CallAuction.sortDescending(buys);
-        assertEq(buys[0].id, 2); // higher price sorts first
+        assertEq(buys[0].id, 2);
 
         CallAuction.Order[] memory sells = new CallAuction.Order[](2);
         sells[0] = _order(3, 100e18, 2e18);
         sells[1] = _order(4, 95e18, 2e18);
         CallAuction.sortAscending(sells);
-        assertEq(sells[0].id, 4); // lower price sorts first
+        assertEq(sells[0].id, 4);
 
         CallAuction.Result memory r = CallAuction.clear(buys, sells, 100e18, 500);
         assertEq(r.matchedQty, 4e18);
@@ -108,7 +105,7 @@ contract CallAuctionTest is Test {
         sells[0] = _order(2, sellPrice, sellQty);
 
         uint256 nav = (uint256(buyPrice) + sellPrice) / 2;
-        CallAuction.Result memory r = CallAuction.clear(buys, sells, nav, 10_000); // 100% band, isolates the volume invariant
+        CallAuction.Result memory r = CallAuction.clear(buys, sells, nav, 10_000);
 
         uint256 maxPossible = buyQty < sellQty ? buyQty : sellQty;
         assertLe(r.matchedQty, maxPossible);

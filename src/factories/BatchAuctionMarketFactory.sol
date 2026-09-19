@@ -3,8 +3,6 @@ pragma solidity ^0.8.24;
 
 import {BatchAuctionMarket} from "../BatchAuctionMarket.sol";
 
-/// @notice See IdentityRegistryFactory — same reason this is split out of MarketFactory.
-/// BatchAuctionMarket is the largest of the four contracts, so this split matters most here.
 contract BatchAuctionMarketFactory {
     function deploy(
         address assetToken,

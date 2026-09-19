@@ -7,12 +7,6 @@ import {PermissionedAssetToken} from "../../src/PermissionedAssetToken.sol";
 import {NAVOracle} from "../../src/NAVOracle.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 
-/// @notice Randomly drives BatchAuctionMarket through submit/cancel/settle/NAV/time
-/// sequences for invariant testing. Every action is bounded to a valid range and
-/// wrapped in try/catch so a rejected action (submitting to a closed round, an
-/// actor cancelling someone else's order, ...) is simply skipped rather than
-/// counted as a fuzz failure — the property under test is fund conservation, not
-/// "every call succeeds."
 contract BatchAuctionMarketHandler is Test {
     BatchAuctionMarket public market;
     PermissionedAssetToken public token;

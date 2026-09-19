@@ -82,9 +82,7 @@ contract BatchAuctionMarketTest is Test {
 
         assertEq(assetToken.balanceOf(buyer), 5e18);
         assertEq(assetToken.balanceOf(seller), 5e18);
-        // clearing price clamps to NAV=100 (inside the [90,110] crossing interval)
         assertEq(usdc.balanceOf(seller), 500e18);
-        // buyer escrowed 110*5=550, paid 100*5=500, refunded 50
         assertEq(usdc.balanceOf(buyer), 10_000e18 - 500e18);
     }
 
@@ -100,14 +98,6 @@ contract BatchAuctionMarketTest is Test {
     }
 
     function test_RevokedAttestationRefreshedBeforeSettlementIsExcludedAndRefunded() public {
-        // isEligible() reads a cache populated by refreshEligibility(), not a live
-        // EAS lookup on every call (that would be an external call per transfer —
-        // too expensive). So revoking an attestation alone doesn't retroactively
-        // flip a cached record; what closes the mid-round gap is that *anyone* —
-        // the trader, the issuer, an automated compliance bot — can permissionlessly
-        // call refreshEligibility() to pull the revocation into the cache before
-        // settlement runs, and settleRound() always reads the live cache, not a
-        // snapshot taken at order-submission time.
         bytes32 sellerUID = keccak256(abi.encode("attestation", seller));
 
         market.startRound();
@@ -117,10 +107,7 @@ contract BatchAuctionMarketTest is Test {
         vm.prank(seller);
         market.submitOrder(false, 90e18, 5e18);
 
-        // issuer's KYC vendor revokes the seller's attestation after submission...
         eas.revoke(sellerUID);
-        // ...and a refresh (callable by anyone) pulls the revocation into the cache
-        // before the round settles.
         bytes32[] memory uids = new bytes32[](1);
         uids[0] = sellerUID;
         registry.refreshEligibility(seller, uids);
@@ -129,20 +116,11 @@ contract BatchAuctionMarketTest is Test {
         vm.warp(block.timestamp + 1 hours);
         market.settleRound();
 
-        // no match: seller was excluded at settlement-time eligibility re-check
         assertEq(assetToken.balanceOf(buyer), 0);
-        assertEq(assetToken.balanceOf(seller), sellerAssetBefore + 5e18); // full refund
-        assertEq(usdc.balanceOf(buyer), 10_000e18); // full refund
+        assertEq(assetToken.balanceOf(seller), sellerAssetBefore + 5e18);
+        assertEq(usdc.balanceOf(buyer), 10_000e18);
     }
 
-    /// @notice Documents the actual boundary of the eligibility guarantee: revoking
-    /// an attestation alone does NOT retroactively invalidate an already-cached
-    /// eligibility record. The cache is only as fresh as the last refreshEligibility()
-    /// call, bounded by maxCacheAge / the attestation's own expirationTime. This is a
-    /// deliberate gas/trust tradeoff, not a bug — but it means "closes the mid-round
-    /// gap" depends on someone actually calling refresh before settlement, and
-    /// production deployments should set maxCacheAge no longer than the round
-    /// duration if instant-ish revocation matters for a given asset.
     function test_RevocationWithoutRefreshDoesNotRetroactivelyExcludeCachedEligibility() public {
         market.startRound();
 
@@ -151,13 +129,11 @@ contract BatchAuctionMarketTest is Test {
         vm.prank(seller);
         market.submitOrder(false, 90e18, 5e18);
 
-        eas.revoke(keccak256(abi.encode("attestation", seller))); // no refresh call after this
+        eas.revoke(keccak256(abi.encode("attestation", seller)));
 
         vm.warp(block.timestamp + 1 hours);
         market.settleRound();
 
-        // trade still matched: the cache was never refreshed, so isEligible(seller)
-        // still reflects its pre-revocation state.
         assertEq(assetToken.balanceOf(buyer), 5e18);
         assertEq(usdc.balanceOf(seller), 500e18);
     }
@@ -173,17 +149,6 @@ contract BatchAuctionMarketTest is Test {
         assertEq(usdc.balanceOf(buyer), balanceAfterSubmit + 200e18);
     }
 
-    /// @notice Regression test for a real bug an invariant test found: summing each
-    /// buy order's own floor(price*qty/1e18) contribution and separately summing
-    /// each sell order's own floor(filled*clearingPrice/1e18) proceeds can disagree
-    /// by a few units even though both sides matched the same total quantity —
-    /// different order-size partitions of the same total round differently. With
-    /// two buy orders of qty 0.7e18 and 1.3e18 against one seller for 2e18 at this
-    /// clearing price, the naive per-order formulas would retain 2469135780246913577
-    /// from buyers but the naive seller-proceeds formula would try to pay out
-    /// 2469135780246913578 — one unit more than was ever collected. The fix pays the
-    /// last filled seller `sellerPool - alreadyDistributed` instead of its own
-    /// formula, so the round always settles exactly, with nothing left stranded.
     function test_RoundingRemainderAcrossOrderPartitionsSettlesExactlyWithNoStrandedFunds() public {
         uint256 clearingPrice = 1234567890123456789;
         vm.prank(issuer);
@@ -204,10 +169,6 @@ contract BatchAuctionMarketTest is Test {
         vm.warp(block.timestamp + 1 hours);
         market.settleRound();
 
-        // The seller can only ever receive what was actually retained from buyers'
-        // independently-floored escrow (sellerPool) — not floor(totalQty*price/1e18),
-        // which is 1 wei more here than the buy side ever collected. Paying that
-        // would mean creating a wei that was never escrowed.
         uint256 expectedSellerProceeds = (7e17 * clearingPrice) / 1e18 + (13e17 * clearingPrice) / 1e18;
         assertEq(expectedSellerProceeds, (2e18 * clearingPrice) / 1e18 - 1, "test fixture must exercise the gap");
         assertEq(usdc.balanceOf(seller), expectedSellerProceeds);
@@ -239,16 +200,14 @@ contract BatchAuctionMarketTest is Test {
         vm.expectRevert();
         market.submitOrder(true, 100e18, 1e18);
 
-        // an investor can still get their own escrowed funds back while paused
         uint256 buyerBalanceBefore = usdc.balanceOf(buyer);
         vm.prank(buyer);
         market.cancelOrder(buyOrderId);
         assertEq(usdc.balanceOf(buyer), buyerBalanceBefore + 550e18);
 
-        // an already-open round can still be settled while paused
         vm.warp(block.timestamp + 1 hours);
         market.settleRound();
-        assertEq(assetToken.balanceOf(seller), 10e18); // seller's order refunded (no counterparty left)
+        assertEq(assetToken.balanceOf(seller), 10e18);
     }
 
     function test_UnpauseRestoresNewActivity() public {
@@ -282,20 +241,16 @@ contract BatchAuctionMarketTest is Test {
         market.startRound();
         assertEq(market.currentRoundId(), 2);
 
-        // a fresh order in round 2 gets a fresh id, distinct from round 1's
         vm.prank(seller);
         uint256 round2OrderId = market.submitOrder(false, 90e18, 3e18);
         assertTrue(round2OrderId != round1OrderId);
 
-        // round 1's already-settled order is untouched by round 2 settling
         (,,,,, bool round1Settled) = market.orders(round1OrderId);
         assertTrue(round1Settled);
 
-        // round 2 has no matching buy order, so it must fully refund, not match
-        // against anything left over from round 1
         uint256 sellerBalanceBeforeSettle = assetToken.balanceOf(seller);
         vm.warp(block.timestamp + 1 hours);
         market.settleRound();
-        assertEq(assetToken.balanceOf(seller), sellerBalanceBeforeSettle + 3e18); // refunded in full
+        assertEq(assetToken.balanceOf(seller), sellerBalanceBeforeSettle + 3e18);
     }
 }

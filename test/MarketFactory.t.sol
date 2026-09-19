@@ -32,8 +32,6 @@ contract MarketFactoryTest is Test {
         assertTrue(PermissionedAssetToken(token).exemptOperators(market));
         assertEq(BatchAuctionMarket(market).owner(), issuer);
 
-        // Ownable2Step: ownership transfer is only proposed by the factory, not
-        // completed — the token stays factory-owned until the issuer accepts it.
         assertEq(PermissionedAssetToken(token).owner(), address(factory));
         assertEq(PermissionedAssetToken(token).pendingOwner(), issuer);
 

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @notice Minimal vendored subset of the Ethereum Attestation Service interface
-/// (https://github.com/ethereum-attestation-service/eas-contracts), deployed as a
-/// predeploy on every OP Stack chain including Base. Only the read path Agora needs.
 struct Attestation {
     bytes32 uid;
     bytes32 schema;

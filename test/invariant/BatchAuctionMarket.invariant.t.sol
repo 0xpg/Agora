@@ -10,11 +10,6 @@ import {MockEAS} from "../mocks/MockEAS.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {BatchAuctionMarketHandler} from "./BatchAuctionMarketHandler.sol";
 
-/// @notice Fund-conservation property: across any sequence of submit/cancel/settle
-/// calls, every token the market holds is exactly the escrow still owed to an
-/// unsettled order — no value is created, destroyed, or left stranded. Checked
-/// structurally from the market's own order state (not a parallel ghost-accounting
-/// mirror), so a bug can't hide by being duplicated in both places.
 contract BatchAuctionMarketInvariantTest is Test {
     bytes32 constant KYC_SCHEMA = keccak256("KYC");
 

@@ -8,13 +8,6 @@ import {NAVOracleFactory} from "../src/factories/NAVOracleFactory.sol";
 import {AssetTokenFactory} from "../src/factories/AssetTokenFactory.sol";
 import {BatchAuctionMarketFactory} from "../src/factories/BatchAuctionMarketFactory.sol";
 
-/// @notice Deploys the four per-contract sub-factories, then MarketFactory wired to
-/// their addresses (see MarketFactory's NatSpec for why the sub-factories must be
-/// deployed independently rather than from MarketFactory's own constructor) and
-/// pointed at the chain's EAS predeploy and a settlement token. Fill in EAS_ADDRESS
-/// / SETTLEMENT_TOKEN in .env before running — see .env.example. On Base/Base
-/// Sepolia, look up the current addresses at docs.base.org (EAS) and Circle's docs
-/// (native USDC) rather than trusting a hardcoded value here.
 contract Deploy is Script {
     function run() external returns (MarketFactory factory) {
         address easAddress = vm.envAddress("EAS_ADDRESS");

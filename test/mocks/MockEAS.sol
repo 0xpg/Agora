@@ -3,8 +3,6 @@ pragma solidity ^0.8.24;
 
 import {IEAS, Attestation} from "../../src/interfaces/IEAS.sol";
 
-/// @notice Test-only stand-in for the real EAS contract deployed on Base. Lets tests
-/// register attestations directly instead of going through EAS's full attest() flow.
 contract MockEAS is IEAS {
     mapping(bytes32 => Attestation) private _attestations;
 

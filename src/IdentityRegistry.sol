@@ -5,18 +5,6 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IEAS, Attestation} from "./interfaces/IEAS.sol";
 
-/// @notice On-chain eligibility gate backed by EAS attestations (e.g. Coinbase
-/// Verifications for KYC/country, plus an issuer-defined accreditation schema).
-/// EAS has no on-chain index by recipient, so callers supply candidate attestation
-/// UIDs (looked up off-chain via an EAS indexer); the contract independently
-/// re-verifies each one on-chain before caching a result. isEligible() is then a
-/// cheap view read for PermissionedAssetToken transfers and BatchAuctionMarket
-/// order submission/settlement.
-///
-/// Ownable2Step: the owner controls which attestation schemas/attesters count as
-/// eligibility, so a bricked transfer here would strand compliance admin, not just
-/// convenience — see NAVOracle's NatSpec for the same reasoning, including that
-/// this only rules out transfer-to-unreachable-address, not single-key compromise.
 contract IdentityRegistry is Ownable2Step {
     struct EligibilityRecord {
         bool eligible;
@@ -59,10 +47,6 @@ contract IdentityRegistry is Ownable2Step {
         return requiredSchemas.length;
     }
 
-    /// @notice Permissionlessly (re-)verify an investor's eligibility against a set
-    /// of candidate attestation UIDs, one per required schema. Caller is trusted to
-    /// supply the UIDs (found off-chain via an EAS indexer) but not trusted about
-    /// their validity — every field is checked against on-chain EAS state.
     function refreshEligibility(address investor, bytes32[] calldata attestationUIDs) external {
         uint256 n = requiredSchemas.length;
         require(n > 0, "no required schemas configured");
