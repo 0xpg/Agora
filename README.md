@@ -127,6 +127,16 @@ forge script script/Deploy.s.sol:Deploy --rpc-url $RPC_URL --broadcast --verify
 Verify `EAS_ADDRESS` (Base's EAS predeploy) and `SETTLEMENT_TOKEN` (native USDC)
 against current docs before deploying — see `.env.example`.
 
+## Frontend integration
+
+`abi/` holds one ABI file per contract (regenerate with `./bin/export-abi.sh`
+after any contract change), and `config/` holds deployed addresses and
+per-market display metadata, both configurable per chain ID and both empty
+until the first deployment. See [`INTEGRATION.md`](INTEGRATION.md) for how each
+piece of a typical markets/trade UI maps to a contract read, write, or event —
+including the one structural point that matters most: Agora has no swap
+function, only order submission into a round that settles later.
+
 ## Status / roadmap
 
 This is a hackathon-stage scaffold: core matching, escrow, eligibility, and fund
