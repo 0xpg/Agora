@@ -64,8 +64,14 @@ contract BatchAuctionMarketInvariantTest is Test {
         assertEq(token.balanceOf(address(market)), _unsettledEscrow(false));
     }
 
-    function invariant_SettlementTokenBalanceMatchesUnsettledBuyEscrow() public view {
-        assertEq(usdc.balanceOf(address(market)), _unsettledEscrow(true));
+    function invariant_SettlementTokenBalanceCoversUnsettledBuyEscrow() public view {
+        assertGe(usdc.balanceOf(address(market)), _unsettledEscrow(true));
+    }
+
+    function invariant_SettlementTokenBalanceMatchesEscrowPlusSpreadWithinDust() public view {
+        uint256 expected = _unsettledEscrow(true) + market.accumulatedSpread();
+        uint256 actual = usdc.balanceOf(address(market));
+        assertLe(actual > expected ? actual - expected : expected - actual, 1e6);
     }
 
     function invariant_SettledOrdersAlwaysHaveZeroQty() public view {

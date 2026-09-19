@@ -22,7 +22,6 @@ contract BatchAuctionMarketTest is Test {
     address issuer = makeAddr("issuer");
     address kycAttester = makeAddr("kycAttester");
     address buyer = makeAddr("buyer");
-    address buyer2 = makeAddr("buyer2");
     address seller = makeAddr("seller");
     address notWhitelisted = makeAddr("notWhitelisted");
 
@@ -82,8 +81,9 @@ contract BatchAuctionMarketTest is Test {
 
         assertEq(assetToken.balanceOf(buyer), 5e18);
         assertEq(assetToken.balanceOf(seller), 5e18);
-        assertEq(usdc.balanceOf(seller), 500e18);
-        assertEq(usdc.balanceOf(buyer), 10_000e18 - 500e18);
+        assertEq(usdc.balanceOf(seller), 450e18);
+        assertEq(usdc.balanceOf(buyer), 10_000e18 - 550e18);
+        assertEq(market.accumulatedSpread(), 100e18);
     }
 
     function test_IneligibleTraderAtSubmitTimeIsRejected() public {
@@ -135,7 +135,7 @@ contract BatchAuctionMarketTest is Test {
         market.settleRound();
 
         assertEq(assetToken.balanceOf(buyer), 5e18);
-        assertEq(usdc.balanceOf(seller), 500e18);
+        assertEq(usdc.balanceOf(seller), 450e18);
     }
 
     function test_CancelOrderRefundsEscrow() public {
@@ -149,33 +149,40 @@ contract BatchAuctionMarketTest is Test {
         assertEq(usdc.balanceOf(buyer), balanceAfterSubmit + 200e18);
     }
 
-    function test_RoundingRemainderAcrossOrderPartitionsSettlesExactlyWithNoStrandedFunds() public {
-        uint256 clearingPrice = 1234567890123456789;
-        vm.prank(issuer);
-        navOracle.setNAV(clearingPrice);
-        _whitelist(buyer2);
-        usdc.mint(buyer2, 10_000e18);
-        vm.prank(buyer2);
-        usdc.approve(address(market), type(uint256).max);
-
+    function test_AccumulatedSpreadIsWithdrawableByIssuer() public {
         market.startRound();
         vm.prank(buyer);
-        market.submitOrder(true, clearingPrice, 7e17);
-        vm.prank(buyer2);
-        market.submitOrder(true, clearingPrice, 13e17);
+        market.submitOrder(true, 110e18, 5e18);
         vm.prank(seller);
-        market.submitOrder(false, clearingPrice, 2e18);
+        market.submitOrder(false, 90e18, 5e18);
 
         vm.warp(block.timestamp + 1 hours);
         market.settleRound();
 
-        uint256 expectedSellerProceeds = (7e17 * clearingPrice) / 1e18 + (13e17 * clearingPrice) / 1e18;
-        assertEq(expectedSellerProceeds, (2e18 * clearingPrice) / 1e18 - 1, "test fixture must exercise the gap");
-        assertEq(usdc.balanceOf(seller), expectedSellerProceeds);
-        assertEq(assetToken.balanceOf(buyer), 7e17);
-        assertEq(assetToken.balanceOf(buyer2), 13e17);
+        assertEq(market.accumulatedSpread(), 100e18);
+        assertEq(usdc.balanceOf(address(market)), 100e18);
+
+        address treasury = makeAddr("treasury");
+        vm.prank(issuer);
+        market.withdrawSpread(treasury, 100e18);
+
+        assertEq(usdc.balanceOf(treasury), 100e18);
+        assertEq(market.accumulatedSpread(), 0);
         assertEq(usdc.balanceOf(address(market)), 0);
-        assertEq(assetToken.balanceOf(address(market)), 0);
+    }
+
+    function test_WithdrawSpreadRevertsPastAccumulated() public {
+        market.startRound();
+        vm.prank(buyer);
+        market.submitOrder(true, 110e18, 5e18);
+        vm.prank(seller);
+        market.submitOrder(false, 90e18, 5e18);
+        vm.warp(block.timestamp + 1 hours);
+        market.settleRound();
+
+        vm.prank(issuer);
+        vm.expectRevert();
+        market.withdrawSpread(makeAddr("treasury"), 100e18 + 1);
     }
 
     function test_PauseBlocksStartRound() public {

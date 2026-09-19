@@ -13,14 +13,30 @@ reference price (an issuer-published NAV) is structurally exposed to
 update first trades against the pool before it reprices, extracting the gap from
 LPs.
 
-Agora is instead a **periodic uniform-price call auction**: orders escrow into a
-round, the round closes on a timer, and every matched order clears at one price —
-computed only after the round closes, using the NAV known at that moment. There is
-no stale-price window to extract, and no LPs required. See
-[`src/libraries/CallAuction.sol`](src/libraries/CallAuction.sol) for the matching
-algorithm and its NatSpec for the full reasoning, including how the clearing price
-is chosen within the volume-maximizing crossing interval and clamped to an
-issuer-configured NAV band.
+Agora is instead a **periodic batch auction**: orders escrow into a round, the
+round closes on a timer, and settlement runs once, after close, using only
+information that existed before anyone could react to it. There is no
+stale-price window to extract, and no LPs required.
+
+The clearing price is deliberately not "whatever price the marginal trader
+happened to bid." After matching buys against sells by price, `CallAuction`
+looks at the next order on each side that did *not* get matched. If the
+midpoint of those two next-in-line prices falls between the last matched buy
+and sell price, every matched order clears at that single midpoint — the price
+is set entirely by orders that never trade, so no included trader's own bid
+moves what they pay. When that midpoint falls outside the matched range
+instead, the smallest (marginal) fill is dropped from the match, and the
+remaining buyers pay the excluded marginal buy price while the remaining
+sellers receive the excluded marginal sell price — two different prices, with
+the difference collected as `accumulatedSpread` on `BatchAuctionMarket`,
+withdrawable by the issuer. Either way, the price is fixed by someone outside
+the final trading set, not by a participant's own order — see
+[`src/libraries/CallAuction.sol`](src/libraries/CallAuction.sol).
+
+The NAV band still applies on top of this: the issuer's band is checked
+against the midpoint of whatever price(s) result, and the round voids
+entirely — a full, untouched refund for every order, nothing partially
+matched — if that midpoint sits outside it.
 
 ## Compliance layer
 
@@ -54,25 +70,30 @@ the round duration for assets where that matters.
 An investor who becomes ineligible can still always withdraw assets they already
 escrowed (a cancelled order, or the unmatched/leftover portion of a settled one) —
 a compliance status change must not trap already-owned funds. See
-`PermissionedAssetToken.exemptOperators` and its NatSpec.
+`PermissionedAssetToken.exemptOperators`, which exempts `BatchAuctionMarket`
+from the eligibility check on both sides of a transfer so escrow and refunds
+always move freely between the market and an investor's own wallet.
 
 ## Fund conservation
 
 `test/invariant/BatchAuctionMarket.invariant.t.sol` runs a handler through random
-sequences of submit/cancel/settle/NAV-update/time-warp calls and checks, after
-every call, that the market's token balances exactly equal what's still owed to
-open orders — computed structurally from order state, not from a parallel
-ghost-accounting mirror that could hide the same bug twice. It caught a real bug
-during development: settling a round by summing each order's own
-`floor(price*qty/1e18)` independently can round differently on the buy side than
-the sell side even when both sides matched the same total quantity, because
-different order-size partitions of the same total round differently. `_settleBuys`
-computes each buy order's retained amount once and refunds by subtraction (exact
-against its own escrow by construction); `_settleSells` pays every filled order the
-standard per-order amount except the last, which absorbs whatever rounding
-remainder is left — so the round always settles exactly, never over- or
-under-paying. See the NatSpec on `_settleBuys`/`_settleSells` and the deterministic
-regression test in `BatchAuctionMarket.t.sol` for the exact numbers.
+sequences of submit/cancel/settle/NAV-update/time-warp/spread-withdrawal calls
+and checks, after every call, that the market's token balances always cover
+what's still owed to open orders — computed structurally from order state, not
+from a parallel ghost-accounting mirror that could hide the same bug twice.
+
+It caught two real bugs during development. First: an early version applied the
+NAV-band void check *after* the matching loop had already mutated order
+quantities in memory, so a voided round could still hand out tokens without
+proper payment — `CallAuction.clear` now works on scratch copies of remaining
+quantities and only writes them back to the caller's arrays once every check has
+passed (`test_VoidedRoundLeavesOrderQuantitiesUntouched`). Second: an
+exact-distribution scheme that forced one side's payouts to sum precisely to a
+target pool turned out to risk underflowing a buyer's own refund in rare
+many-tiny-orders cases — replaced with independent per-order computation
+(provably bounded against that buyer's own escrow) plus a floor-protected
+`accumulatedSpread` tracker that only ever understates, never overstates, what's
+safely withdrawable.
 
 ## Contracts
 
@@ -81,13 +102,17 @@ regression test in `BatchAuctionMarket.t.sol` for the exact numbers.
 | `IdentityRegistry` | EAS-backed eligibility cache |
 | `PermissionedAssetToken` | ERC-20 tokenized security, transfer-gated on eligibility |
 | `NAVOracle` | Issuer-published reference price + staleness bound |
-| `CallAuction` (library) | Pure uniform-price clearing algorithm |
+| `CallAuction` (library) | Pure clearing algorithm: single or two-sided price, NAV-band gated |
 | `BatchAuctionMarket` | Order escrow, round lifecycle, settlement, pause |
 | `MarketFactory` + `src/factories/*` | Self-serve deployment of a full market set per issuer |
 
 `MarketFactory` orchestrates four small per-contract sub-factories rather than
-deploying everything via `new` directly — see its NatSpec for why (EIP-170's
-24,576-byte contract size limit).
+deploying everything via `new` directly: embedding all four contracts' creation
+bytecode in one contract blows past EIP-170's 24,576-byte runtime size limit
+(this contract alone hit ~35KB before the split), and `new X()` inside a
+constructor embeds `X`'s bytecode into the caller regardless of how many
+indirection layers deep — so the sub-factories are deployed independently (see
+`script/Deploy.s.sol`) and `MarketFactory` only ever calls them by address.
 
 `IdentityRegistry`, `PermissionedAssetToken`, `NAVOracle`, and `BatchAuctionMarket`
 all use `Ownable2Step`, not plain `Ownable`: a bad `transferOwnership` call to an
@@ -112,10 +137,11 @@ forge test -vv
 ```
 
 The `CallAuction` matching algorithm has both example-based and fuzz tests
-(`test/CallAuction.t.sol`); `test/BatchAuctionMarket.t.sol` covers a full round
-end-to-end, the eligibility edge cases above, pause behavior, a deterministic
-rounding regression, and a two-round sequence; `test/invariant/` covers fund
-conservation across randomized multi-round sequences (see above).
+(`test/CallAuction.t.sol`), including both pricing branches and the
+voided-round mutation-safety check; `test/BatchAuctionMarket.t.sol` covers a
+full round end-to-end, the eligibility edge cases above, pause behavior, and
+spread accumulation/withdrawal; `test/invariant/` covers fund conservation
+across randomized multi-round sequences (see above).
 
 ## Deploy
 

@@ -90,4 +90,12 @@ contract BatchAuctionMarketHandler is Test {
     function warpForward(uint256 seed) external {
         vm.warp(block.timestamp + bound(seed, 1 minutes, 2 hours));
     }
+
+    function withdrawSpread(uint256 amountSeed) external {
+        uint256 available = market.accumulatedSpread();
+        if (available == 0) return;
+        uint256 amount = bound(amountSeed, 1, available);
+        vm.prank(issuer);
+        try market.withdrawSpread(issuer, amount) {} catch {}
+    }
 }

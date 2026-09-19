@@ -3,10 +3,15 @@
 Agora is not an AMM. There is no swap function and no instant execution. Trading
 is: submit a limit order into whichever round is currently open, wait for that
 round's close time, then anyone calls `settleRound()` and every order in it
-clears at one price. A Trade page built as a literal "enter amount, click swap"
-widget has nothing to call on this contract — it needs to be an order ticket
-(amount + limit price, submitted into the open round) with a round countdown and
-a pending/settled order state, not an instant result.
+clears. A Trade page built as a literal "enter amount, click swap" widget has
+nothing to call on this contract — it needs to be an order ticket (amount +
+limit price, submitted into the open round) with a round countdown and a
+pending/settled order state, not an instant result.
+
+A settled round usually has one clearing price for everyone, but not always:
+`RoundSettled(roundId, buyPrice, sellPrice, matchedQty)` can carry two different
+prices, with the difference retained by the contract as `accumulatedSpread`. A
+UI showing "last price" should show both when they differ, not just one.
 
 Everything else — asset factsheet fields, NAV, premium, eligibility, liquidity,
 price history — maps directly onto what's below.
@@ -31,10 +36,10 @@ price history — maps directly onto what's below.
 | NAV-managed / Standard pool badge | `config/markets.json` |
 | KYC badge | presence of required schemas on that market's `IdentityRegistry` |
 | Reference NAV | `NAVOracle.getNAV()` |
-| Last clearing price ("pool price") | latest `RoundSettled` event for that market |
-| Premium (bps) | `(clearingPrice - nav) / nav`, computed client-side |
+| Last clearing price(s) ("pool price") | latest `RoundSettled` event for that market — `buyPrice`/`sellPrice`, equal when the round cleared at a single price |
+| Premium (bps) | `(midpoint(buyPrice, sellPrice) - nav) / nav`, computed client-side |
 | Liquidity | sum of currently-escrowed amounts; cheapest from indexed `OrderSubmitted` minus `OrderCancelled`/settlement events, not a single contract read |
-| Price chart | `RoundSettled` history as a step series, clearing price vs NAV |
+| Price chart | `RoundSettled` history as a step series, clearing price(s) vs NAV |
 | 30D volume, total liquidity across markets | aggregate over indexed events across all markets |
 | "5 of 6 open" | per market, whether `currentRoundSettled()` is false and `block.timestamp < roundCloseAt()` |
 
