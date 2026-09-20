@@ -239,6 +239,14 @@ against current docs before deploying — see `.env.example`.
 
 ## Frontend integration
 
+The Vue frontend and its tooling live in `frontend/`:
+
+```shell
+cd frontend
+npm ci
+npm run dev
+```
+
 `abi/` holds one ABI file per contract (regenerate with `./bin/export-abi.sh`
 after any contract change), and `config/` holds deployed addresses and
 per-market display metadata, both configurable per chain ID and both empty
