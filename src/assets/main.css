@@ -1,0 +1,40 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --color-page: #f9f9f7;
+  --color-surface: #fcfcfb;
+  --color-ink: #0b0b0b;
+  --color-ink-secondary: #52514e;
+  --color-ink-muted: #898781;
+  --color-hairline: #e1e0d9;
+  --color-axis: #c3c2b7;
+
+  --color-nav: #2a78d6;
+  --color-price: #eb6834;
+
+  /* Brand accent ("Teal Institutional") — used for links, active states, and
+     primary actions. Distinct from --color-nav/--color-price, which remain
+     the chart's fixed NAV/Price series colors. */
+  --color-primary: #0f766e;
+  --color-primary-soft: #ccfbf1;
+  --color-primary-ink: #042f2c;
+
+  --color-success: #006300;
+  --color-good: #0ca30c;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #d03b3b;
+}
+
+body {
+  background-color: var(--color-page);
+  color: var(--color-ink);
+  font-variant-numeric: normal;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
