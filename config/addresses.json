@@ -1,0 +1,13 @@
+{
+  "84532": {
+    "chainName": "baseSepolia",
+    "eas": null,
+    "settlementToken": null,
+    "identityRegistryFactory": null,
+    "navOracleFactory": null,
+    "assetTokenFactory": null,
+    "batchAuctionMarketFactory": null,
+    "marketFactory": null,
+    "markets": []
+  }
+}
