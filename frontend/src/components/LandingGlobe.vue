@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { readThemeColor } from '@/utils/themeTokens'
 
 /* A slowly turning globe of dots, with continents picked out of it.
  *
@@ -131,15 +132,11 @@ interface Cell {
   shade: number
 }
 
-/* The accent is read from the theme token rather than repeated here, so the
- * globe can never drift from the rest of the palette. Canvas needs a plain
- * colour string, so the hex is unpacked into channels and alpha applied
- * directly — color-mix() is not reliably accepted as a fillStyle, and a
- * rejected one silently keeps the previous colour. */
-function readAccentRgb(el: HTMLElement): [number, number, number] {
-  const raw = getComputedStyle(el).getPropertyValue('--color-primary').trim()
-  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(raw)?.[1]
-  if (!hex) return [16, 185, 129]
+/* Canvas needs a plain colour string, so the accent is unpacked into channels
+ * and alpha applied directly — color-mix() is not reliably accepted as a
+ * fillStyle, and a rejected one silently keeps the previous colour. */
+function readAccentRgb(): [number, number, number] {
+  const hex = readThemeColor('--color-primary', '#10b981').slice(1)
   const full = hex.length === 3 ? hex.replace(/./g, (c) => c + c) : hex
   return [
     parseInt(full.slice(0, 2), 16),
@@ -158,7 +155,7 @@ onMounted(() => {
   // paint. The globe is decorative, so it is built once the page is on screen
   // and fades in when it is ready; everything below tolerates it being absent.
   let map: Uint8Array | null = null
-  const [r, g, b] = readAccentRgb(el)
+  const [r, g, b] = readAccentRgb()
 
   // Land and sea are the same ink at different strengths, so the sphere reads
   // as one object lit from the front rather than two overlaid patterns.

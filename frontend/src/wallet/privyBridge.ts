@@ -8,6 +8,7 @@ import {
   useWallets,
 } from '@privy-io/react-auth'
 import { TARGET_CHAIN } from '@/config/chain'
+import { readThemeColor } from '@/utils/themeTokens'
 import type { WalletStore } from '@/stores/wallet'
 
 // Privy reports the active chain in CAIP-2 form ("eip155:84532").
@@ -98,6 +99,15 @@ export function mountPrivyBridge(store: WalletStore) {
     createElement(PrivyProvider, {
       appId,
       config: {
+        // Privy renders its own modal, so it has to be told the theme — left
+        // alone it ships a light one that arrives as a white sheet over the
+        // dark app. Given a background it derives its own foreground from the
+        // luminance, so it is handed the elevated surface the rest of the app
+        // floats things on, and the emerald accent for its buttons.
+        appearance: {
+          theme: readThemeColor('--color-elevated', '#101815'),
+          accentColor: readThemeColor('--color-primary', '#10b981'),
+        },
         // Wallet first, with email as the path that gets someone without a
         // wallet an embedded one.
         loginMethods: ['wallet', 'email'],
