@@ -255,6 +255,45 @@ piece of a typical markets/trade UI maps to a contract read, write, or event —
 including the one structural point that matters most: Agora has no swap
 function, only order submission into a round that settles later.
 
+### Wallet onboarding (Privy)
+
+Onboarding runs through [Privy](https://dashboard.privy.io), which connects an
+existing external wallet or creates an embedded one for someone who has none.
+
+1. Create an app in the Privy dashboard, then register the origins it may run
+   on: `http://localhost:5173` for local work (add the port you actually use)
+   and the Cloudflare Pages production domain.
+2. Copy the app's **App ID** into `frontend/.env.local`:
+
+   ```shell
+   cd frontend
+   cp .env.example .env.local   # then fill in VITE_PRIVY_APP_ID
+   ```
+
+   The App ID is public and ships in the bundle. The **app secret** and any
+   **authorization key** are server-side credentials — keep them out of
+   `frontend/` and out of the repo entirely.
+3. Verify locally with `npm run dev`: "Connect Wallet" in the header and in the
+   trade panel both open Privy's flow, the connected address replaces the
+   button, a reload keeps the session, and disconnecting clears it. With no
+   `VITE_PRIVY_APP_ID` set, the app still runs and says onboarding is
+   unavailable rather than failing silently.
+
+Two things worth knowing before changing this code:
+
+- **The target chain comes from `config/addresses.json`**, never from the UI.
+  `frontend/src/config/chain.ts` resolves it and maps it to a viem chain, which
+  Privy uses as both `defaultChain` and its only `supportedChain`. A manifest
+  with several deployments needs `VITE_CHAIN_ID` to pick one, and a chain with
+  no viem mapping fails at startup instead of guessing.
+- **Privy's web SDK is React-only** — there is no supported Vue build, and
+  `@privy-io/react-auth` cannot be called from Vue components. It therefore runs
+  in a single headless React root, `frontend/src/wallet/privyBridge.ts`, whose
+  only job is to push Privy's state into the Pinia wallet store. That store is
+  the adapter the Vue app talks to, so nothing else imports Privy or React. The
+  `@solana/kit` and `@solana-program/*` dependencies exist only because Privy's
+  bundle imports them unconditionally; Agora itself is EVM-only.
+
 ## Status / roadmap
 
 This is a hackathon-stage scaffold: core matching, escrow, eligibility, and fund

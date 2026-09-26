@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { Investor, TokenizedAsset } from '@/types/market'
 import { useWalletStore } from '@/stores/wallet'
+import { TARGET_CHAIN_NAME } from '@/config/chain'
 import { useOrdersStore } from '@/stores/orders'
 import { eligibilityReason, eligibilityState } from '@/composables/useEligibility'
 import { roundStatusFor, formatCountdown } from '@/utils/roundStatus'
@@ -50,7 +51,10 @@ const estimatedTotal = computed(() => (units.value > 0 ? units.value * limitPric
 const belowMinInvestment = computed(
   () => side.value === 'buy' && estimatedTotal.value > 0 && estimatedTotal.value < props.asset.minInvestment,
 )
-const canSubmit = computed(() => approved.value && units.value > 0 && limitPrice.value > 0 && !belowMinInvestment.value)
+const canSubmit = computed(
+  () =>
+    wallet.canTransact && approved.value && units.value > 0 && limitPrice.value > 0 && !belowMinInvestment.value,
+)
 
 function approve() {
   approved.value = true
@@ -102,23 +106,31 @@ const resultCopy = computed(() => {
       <p class="mt-1 text-sm text-ink-secondary">Orders settle through Agora's periodic batch auction rounds.</p>
       <button
         type="button"
-        class="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90"
+        class="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+        :disabled="wallet.unavailable || !wallet.ready || wallet.connecting"
+        :aria-busy="!wallet.unavailable && (!wallet.ready || wallet.connecting)"
         @click="wallet.connect()"
       >
-        Connect Wallet
+        {{ wallet.connecting ? 'Connecting…' : 'Connect Wallet' }}
       </button>
+      <p v-if="wallet.error" role="alert" class="mt-3 text-sm text-critical">{{ wallet.error }}</p>
     </div>
 
-    <div v-else-if="wallet.network === 'wrong'" class="rounded-md border border-critical/30 bg-critical/5 p-4 text-center">
+    <div v-else-if="!wallet.canTransact" class="rounded-md border border-critical/30 bg-critical/5 p-4 text-center">
       <p class="text-sm font-medium text-critical">Wrong network</p>
-      <p class="mt-1 text-sm text-ink-secondary">Switch to Arbitrum One to trade tokenized assets on Agora.</p>
+      <p class="mt-1 text-sm text-ink-secondary">
+        Switch to {{ TARGET_CHAIN_NAME }} to trade tokenized assets on Agora.
+      </p>
       <button
         type="button"
-        class="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90"
-        @click="wallet.switchNetwork()"
+        class="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+        :disabled="wallet.switching"
+        :aria-busy="wallet.switching"
+        @click="wallet.switchToTargetChain()"
       >
-        Switch to Arbitrum One
+        {{ wallet.switching ? 'Switching…' : 'Switch to ' + TARGET_CHAIN_NAME }}
       </button>
+      <p v-if="wallet.error" role="alert" class="mt-3 text-sm text-critical">{{ wallet.error }}</p>
     </div>
 
     <div v-else-if="!marketOpen" class="rounded-md border border-hairline bg-page p-4">

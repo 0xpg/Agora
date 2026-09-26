@@ -1,21 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import type { Investor } from '@/types/market'
-import { ELIGIBILITY_TIER_LABEL } from '@/types/market'
 import { mockAssets } from '@/data/mockAssets'
 import { useWalletStore } from '@/stores/wallet'
+import { TARGET_CHAIN_NAME } from '@/config/chain'
 import { formatCompactCurrency, truncateAddress } from '@/utils/format'
 
-const props = defineProps<{
+defineProps<{
   investor: Investor
 }>()
 
 const wallet = useWalletStore()
 const route = useRoute()
+const router = useRouter()
 
 const totalLiquidity = computed(() => mockAssets.reduce((sum, asset) => sum + asset.liquidity, 0))
-const walletLabel = computed(() => truncateAddress(props.investor.walletAddress))
+const walletLabel = computed(() => (wallet.address ? truncateAddress(wallet.address) : ''))
 
 const mobileNavOpen = ref(false)
 const mobileNavId = useId()
@@ -30,13 +31,19 @@ const NAV_LINKS = [
 function closeMobileNav() {
   mobileNavOpen.value = false
 }
+
+// Disconnecting ends the session, so it returns to the logged-out landing page.
+async function disconnect() {
+  await wallet.disconnect()
+  router.push('/')
+}
 </script>
 
 <template>
   <header class="sticky top-0 z-50 border-b border-black/40 bg-ink">
     <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3">
       <div class="flex items-center gap-3">
-        <RouterLink to="/markets" class="flex items-center gap-2">
+        <RouterLink to="/" class="flex items-center gap-2">
           <span class="flex h-5 w-5 rotate-45 rounded-[3px] bg-white" />
           <span class="text-base font-semibold tracking-tight text-white">Agora</span>
         </RouterLink>
@@ -44,7 +51,7 @@ function closeMobileNav() {
           class="hidden items-center gap-1.5 whitespace-nowrap rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-xs text-white/70 xl:inline-flex"
         >
           <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-good" />
-          RWA DEX &middot; Mainnet
+          RWA DEX &middot; {{ TARGET_CHAIN_NAME }}
         </span>
         <nav class="hidden items-center gap-3 text-sm md:flex">
           <RouterLink
@@ -88,21 +95,25 @@ function closeMobileNav() {
         <template v-if="!wallet.connected">
           <button
             type="button"
-            class="rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-primary/90"
+            class="rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+            :disabled="wallet.unavailable || !wallet.ready || wallet.connecting"
+            :aria-busy="!wallet.unavailable && (!wallet.ready || wallet.connecting)"
             @click="wallet.connect()"
           >
-            Connect Wallet
+            {{ wallet.connecting ? 'Connecting…' : 'Connect Wallet' }}
           </button>
         </template>
         <template v-else>
           <button
-            v-if="wallet.network === 'wrong'"
+            v-if="wallet.wrongNetwork"
             type="button"
-            class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-critical/40 bg-critical/10 px-2.5 py-1 text-xs font-semibold text-critical transition hover:bg-critical/20"
-            @click="wallet.switchNetwork()"
+            class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-critical/40 bg-critical/10 px-2.5 py-1 text-xs font-semibold text-critical transition hover:bg-critical/20 disabled:opacity-50"
+            :disabled="wallet.switching"
+            :aria-busy="wallet.switching"
+            @click="wallet.switchToTargetChain()"
           >
             <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-critical" />
-            <span class="hidden md:inline">Switch to Arbitrum One</span>
+            <span class="hidden md:inline">Switch to {{ TARGET_CHAIN_NAME }}</span>
             <span class="md:hidden">Wrong Network</span>
           </button>
           <span
@@ -110,23 +121,13 @@ function closeMobileNav() {
             class="hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-xs text-white/80 md:inline-flex"
           >
             <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-good" />
-            Arbitrum One
-          </span>
-
-          <span
-            class="hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-xs font-medium text-white/90 lg:inline-flex"
-          >
-            <span
-              class="h-1.5 w-1.5 shrink-0 rounded-full"
-              :class="investor.kycStatus === 'verified' ? 'bg-good' : 'bg-warning'"
-            />
-            {{ ELIGIBILITY_TIER_LABEL[investor.tier] }}
+            {{ TARGET_CHAIN_NAME }}
           </span>
 
           <button
             type="button"
             class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white px-3 py-1.5 text-xs font-medium text-ink transition hover:bg-white/90"
-            @click="wallet.disconnect()"
+            @click="disconnect()"
           >
             <span
               class="flex h-4 w-4 items-center justify-center rounded-full bg-page text-[9px] font-semibold text-ink-secondary"
@@ -138,6 +139,10 @@ function closeMobileNav() {
         </template>
       </div>
     </div>
+
+    <p v-if="wallet.error" role="alert" class="border-t border-critical/30 bg-critical/15 px-6 py-2 text-xs text-white">
+      {{ wallet.error }}
+    </p>
 
     <nav v-if="mobileNavOpen" :id="mobileNavId" class="border-t border-white/10 px-6 py-3 md:hidden">
       <RouterLink

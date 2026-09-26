@@ -100,5 +100,4 @@ export interface Investor {
   tier: EligibilityTier
   kycStatus: KycStatus
   jurisdiction: string
-  walletAddress: string
 }

@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
 import { mockInvestor } from '@/data/mockInvestor'
+import { useWalletStore } from '@/stores/wallet'
 import { ELIGIBILITY_TIER_LABEL } from '@/types/market'
 import { truncateAddress } from '@/utils/format'
+
+const wallet = useWalletStore()
 </script>
 
 <template>
@@ -30,7 +33,9 @@ import { truncateAddress } from '@/utils/format'
       </div>
       <div class="rounded-lg border border-hairline bg-surface p-4">
         <div class="text-xs text-ink-muted">Wallet</div>
-        <div class="mt-1 text-sm font-semibold tabular-nums text-ink">{{ truncateAddress(mockInvestor.walletAddress) }}</div>
+        <div class="mt-1 text-sm font-semibold tabular-nums text-ink">
+          {{ wallet.address ? truncateAddress(wallet.address) : 'Not connected' }}
+        </div>
       </div>
     </div>
 
