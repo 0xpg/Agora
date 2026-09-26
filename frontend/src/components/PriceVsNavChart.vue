@@ -21,20 +21,38 @@ const props = withDefaults(
     navSeries: NavPoint[]
     priceSeries?: NavPoint[]
     compact?: boolean
+    /* Gives a compact sparkline the same hover readout the full chart has. Off
+       by default: the smallest sparklines (the ones in the markets table) are
+       barely taller than the chip would be, and their row already spells the
+       numbers out in its own columns. */
+    hoverReadout?: boolean
   }>(),
-  { compact: false },
+  { compact: false, hoverReadout: false },
 )
 
 const container = ref<HTMLDivElement | null>(null)
 const chart = shallowRef<IChartApi | null>(null)
 const navLine = shallowRef<ISeriesApi<'Area'> | ISeriesApi<'Line'> | null>(null)
 const priceLine = shallowRef<ISeriesApi<'Area'> | null>(null)
+const readout = ref<HTMLElement | null>(null)
 let resizeObserver: ResizeObserver | null = null
+const box = { width: 0, height: 0 }
 
-const tooltip = ref<{ visible: boolean; x: number; y: number; date: string; nav: string; price: string }>({
+const tooltip = ref<{
+  visible: boolean
+  x: number
+  y: number
+  /* Compact only: the chip sits at whichever edge the hovered point is not
+     near, so it never lands on top of the line it is reporting. */
+  below: boolean
+  date: string
+  nav: string
+  price: string
+}>({
   visible: false,
   x: 0,
   y: 0,
+  below: false,
   date: '',
   nav: '',
   price: '',
@@ -59,10 +77,20 @@ function handleCrosshairMove(param: MouseEventParams) {
   const navValue = seriesValue(param.seriesData.get(navLine.value))
   const priceValue = priceLine.value ? seriesValue(param.seriesData.get(priceLine.value)) : undefined
 
+  // A compact chip is centred on the cursor, so it has to be held far enough
+  // from either edge to stay inside the chart. Its own width is read where it
+  // is already on screen, and only guessed on the first move of a hover.
+  let x: number = param.point.x
+  if (props.compact && box.width) {
+    const half = (readout.value?.offsetWidth ?? 92) / 2 + 2
+    x = Math.min(Math.max(x, half), box.width - half)
+  }
+
   tooltip.value = {
     visible: true,
-    x: param.point.x,
+    x,
     y: param.point.y,
+    below: param.point.y < box.height / 2,
     date: new Date((param.time as number) * 1000).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
@@ -97,9 +125,13 @@ function buildChart() {
       visible: !props.compact,
       borderColor: CHART_COLORS.hairline,
     },
-    crosshair: {
-      mode: props.compact ? CrosshairMode.Hidden : CrosshairMode.Normal,
-    },
+    crosshair: props.compact
+      ? {
+          mode: props.hoverReadout ? CrosshairMode.Magnet : CrosshairMode.Hidden,
+          vertLine: { color: CHART_COLORS.axis, width: 1, style: LineStyle.Dotted, labelVisible: false },
+          horzLine: { visible: false, labelVisible: false },
+        }
+      : { mode: CrosshairMode.Normal },
     handleScroll: !props.compact,
     handleScale: !props.compact,
   })
@@ -112,10 +144,18 @@ function buildChart() {
       bottomColor: CHART_FILLS.primaryBottom,
       priceLineVisible: false,
       lastValueVisible: false,
-      crosshairMarkerVisible: false,
+      crosshairMarkerVisible: props.hoverReadout,
+      crosshairMarkerRadius: 3,
+      crosshairMarkerBorderColor: CHART_COLORS.surface,
     })
     area.setData(toChartData(props.navSeries))
     navLine.value = area
+
+    // A sparkline is meant to show the whole series it was handed. Without
+    // this it keeps the library's default bar spacing, which on 180 points
+    // leaves most of the history off the left of the box.
+    chart.value.timeScale().fitContent()
+    if (props.hoverReadout) chart.value.subscribeCrosshairMove(handleCrosshairMove)
   } else {
     // Price: the traded line — solid, with a subtle area fill under it.
     const price = props.priceSeries
@@ -151,7 +191,9 @@ function buildChart() {
   resizeObserver = new ResizeObserver((entries) => {
     const entry = entries[0]
     if (!entry || !chart.value) return
-    chart.value.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height })
+    box.width = entry.contentRect.width
+    box.height = entry.contentRect.height
+    chart.value.applyOptions({ width: box.width, height: box.height })
   })
   resizeObserver.observe(container.value)
 }
@@ -168,7 +210,7 @@ watch(
   () => {
     if (navLine.value) navLine.value.setData(toChartData(props.navSeries))
     if (priceLine.value && props.priceSeries) priceLine.value.setData(toChartData(props.priceSeries))
-    if (!props.compact) chart.value?.timeScale().fitContent()
+    chart.value?.timeScale().fitContent()
   },
 )
 </script>
@@ -186,6 +228,19 @@ watch(
       </span>
     </div>
     <div ref="container" class="min-h-0 flex-1" />
+    <!-- Sparkline readout: one line, pinned to the edge away from the point.
+         The series is unlabelled on purpose — a compact chart is handed a
+         single series and the caller decides whether it is price or NAV. -->
+    <div
+      v-if="compact && hoverReadout && tooltip.visible"
+      ref="readout"
+      class="pointer-events-none absolute z-10 -translate-x-1/2 whitespace-nowrap rounded border border-hairline bg-elevated px-1.5 py-0.5 text-[10px] leading-tight shadow-lg shadow-black/60"
+      :style="tooltip.below ? { left: `${tooltip.x}px`, bottom: '0px' } : { left: `${tooltip.x}px`, top: '0px' }"
+    >
+      <span class="text-ink-muted">{{ tooltip.date }}</span>
+      <span class="ml-1.5 font-medium tabular-nums text-ink">${{ tooltip.nav }}</span>
+    </div>
+
     <div
       v-if="!compact && tooltip.visible"
       class="pointer-events-none absolute z-10 rounded-md border border-hairline bg-elevated px-2.5 py-1.5 text-xs shadow-xl shadow-black/60"

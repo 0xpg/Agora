@@ -75,7 +75,7 @@ const blockingNote = computed(() => {
     </div>
 
     <div class="h-16 w-full">
-      <PriceVsNavChart :nav-series="asset.priceHistory" compact />
+      <PriceVsNavChart :nav-series="asset.priceHistory" compact hover-readout />
     </div>
 
     <div class="grid grid-cols-3 gap-2 text-xs">
