@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import {
   PrivyProvider,
   useConnectOrCreateWallet,
+  useConnectWallet,
+  useCreateWallet,
   useModalStatus,
   usePrivy,
   useWallets,
@@ -28,7 +30,7 @@ function isUserCancellation(code: string): boolean {
  * into the Pinia store, so Vue components never touch React.
  */
 const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
-  const { ready, authenticated, logout } = usePrivy()
+  const { ready, authenticated, user, logout } = usePrivy()
   const { wallets, ready: walletsReady } = useWallets()
   const { isOpen } = useModalStatus()
   const { connectOrCreateWallet } = useConnectOrCreateWallet({
@@ -38,6 +40,18 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
       store.reportError(`Could not connect a wallet (${code}). Please try again.`)
     },
   })
+
+  // Privy's connectOrCreateWallet is a silent no-op for a signed-in user, so a
+  // session that holds no connected wallet — an email login from before
+  // createOnLogin was set, or an external wallet linked on another visit — needs
+  // its own route to one.
+  const { connectWallet } = useConnectWallet({
+    onError: (code) => {
+      if (isUserCancellation(code)) return
+      store.reportError(`Could not reconnect your wallet (${code}). Please try again.`)
+    },
+  })
+  const { createWallet } = useCreateWallet()
 
   const wallet = wallets[0]
   const address = wallet?.address ?? null
@@ -55,7 +69,12 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
 
   useEffect(() => {
     store.attachDriver({
-      connect: connectOrCreateWallet,
+      connect: () => {
+        if (!authenticated) return connectOrCreateWallet()
+        const linked = user?.wallet
+        if (linked && linked.walletClientType !== 'privy') return connectWallet()
+        createWallet().catch(() => store.reportError('Could not create a wallet for your account. Please try again.'))
+      },
       // Privy's logout ends the account session, but an external wallet
       // connected without authenticating outlives it, so drop that too. Some
       // clients (MetaMask, Phantom) cannot be disconnected programmatically and
@@ -73,7 +92,7 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
         return wallet.getEthereumProvider()
       },
     })
-  }, [store, connectOrCreateWallet, logout, wallet])
+  }, [store, authenticated, user, connectOrCreateWallet, connectWallet, createWallet, logout, wallet])
 
   return null
 }
@@ -115,6 +134,9 @@ export function mountPrivyBridge(store: WalletStore) {
         // are prompted onto and the only one permitted.
         defaultChain: TARGET_CHAIN,
         supportedChains: [TARGET_CHAIN],
+        // An email login otherwise leaves the account with no wallet at all —
+        // Privy defaults this to 'off' — and so nothing Agora can transact with.
+        embeddedWallets: { ethereum: { createOnLogin: 'users-without-wallets' } },
       },
       children: createElement(PrivySync, { store }),
     }),

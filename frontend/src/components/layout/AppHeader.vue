@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import type { Investor } from '@/types/market'
 import { mockAssets } from '@/data/mockAssets'
 import { useWalletStore } from '@/stores/wallet'
@@ -13,7 +13,6 @@ defineProps<{
 
 const wallet = useWalletStore()
 const route = useRoute()
-const router = useRouter()
 
 const totalLiquidity = computed(() => mockAssets.reduce((sum, asset) => sum + asset.liquidity, 0))
 const walletLabel = computed(() => (wallet.address ? truncateAddress(wallet.address) : ''))
@@ -32,10 +31,10 @@ function closeMobileNav() {
   mobileNavOpen.value = false
 }
 
-// Disconnecting ends the session, so it returns to the logged-out landing page.
+// Every page is browsable without a wallet, so disconnecting leaves the user
+// where they are — the header simply falls back to "Connect Wallet".
 async function disconnect() {
   await wallet.disconnect()
-  router.push('/')
 }
 </script>
 
