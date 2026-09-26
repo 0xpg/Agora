@@ -106,7 +106,7 @@ const resultCopy = computed(() => {
       <p class="mt-1 text-sm text-ink-secondary">Orders settle through Agora's periodic batch auction rounds.</p>
       <button
         type="button"
-        class="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+        class="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-primary/90 disabled:opacity-50"
         :disabled="wallet.unavailable || !wallet.ready || wallet.connecting"
         :aria-busy="!wallet.unavailable && (!wallet.ready || wallet.connecting)"
         @click="wallet.connect()"
@@ -123,7 +123,7 @@ const resultCopy = computed(() => {
       </p>
       <button
         type="button"
-        class="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-50"
+        class="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-primary/90 disabled:opacity-50"
         :disabled="wallet.switching"
         :aria-busy="wallet.switching"
         @click="wallet.switchToTargetChain()"
@@ -195,7 +195,7 @@ const resultCopy = computed(() => {
         <button
           type="button"
           class="flex-1 rounded px-3 py-1.5 font-medium transition"
-          :class="side === 'buy' ? 'bg-good text-white' : 'text-ink-secondary'"
+          :class="side === 'buy' ? 'bg-good text-on-accent' : 'text-ink-secondary'"
           @click="side = 'buy'"
         >
           Buy
@@ -203,7 +203,7 @@ const resultCopy = computed(() => {
         <button
           type="button"
           class="flex-1 rounded px-3 py-1.5 font-medium transition"
-          :class="side === 'sell' ? 'bg-critical text-white' : 'text-ink-secondary'"
+          :class="side === 'sell' ? 'bg-critical text-on-accent' : 'text-ink-secondary'"
           @click="side = 'sell'"
         >
           Sell
@@ -264,7 +264,7 @@ const resultCopy = computed(() => {
       <button
         v-else
         type="submit"
-        class="w-full rounded-md bg-primary py-2 text-sm font-medium text-white transition disabled:opacity-40"
+        class="w-full rounded-md bg-primary py-2 text-sm font-medium text-on-accent transition disabled:opacity-40"
         :disabled="!canSubmit"
       >
         Submit {{ side === 'buy' ? 'Buy' : 'Sell' }} Order

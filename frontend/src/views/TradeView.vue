@@ -118,7 +118,7 @@ const infoRows = computed<InfoRow[]>(() => [
           <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div class="flex items-center gap-3">
               <span
-                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-white"
+                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-on-accent"
               >
                 {{ asset.symbol.charAt(0) }}
               </span>

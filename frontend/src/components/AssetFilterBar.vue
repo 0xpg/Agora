@@ -62,7 +62,7 @@ const selectClass =
         class="rounded-full border px-3 py-1 text-xs font-medium transition"
         :class="
           classFilter === 'all'
-            ? 'border-primary bg-primary text-white'
+            ? 'border-primary bg-primary text-on-accent'
             : 'border-hairline text-ink-secondary hover:border-ink-muted'
         "
         @click="classFilter = 'all'"
@@ -76,7 +76,7 @@ const selectClass =
         class="rounded-full border px-3 py-1 text-xs font-medium transition"
         :class="
           classFilter === cls
-            ? 'border-primary bg-primary text-white'
+            ? 'border-primary bg-primary text-on-accent'
             : 'border-hairline text-ink-secondary hover:border-ink-muted'
         "
         @click="classFilter = cls"

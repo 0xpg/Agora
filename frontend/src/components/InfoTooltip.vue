@@ -19,7 +19,7 @@ defineProps<{
       </span>
     </slot>
     <span
-      class="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 w-max max-w-56 -translate-x-1/2 rounded-md bg-ink px-2 py-1.5 text-xs leading-snug text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      class="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 w-max max-w-56 -translate-x-1/2 rounded-md border border-hairline bg-elevated px-2 py-1.5 text-xs leading-snug text-ink-secondary opacity-0 shadow-xl shadow-black/60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
     >
       {{ text }}
     </span>

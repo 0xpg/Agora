@@ -4,35 +4,53 @@
   --font-sans:
     system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  --color-page: #f9f9f7;
-  --color-surface: #fcfcfb;
-  --color-ink: #0b0b0b;
-  --color-ink-secondary: #52514e;
-  --color-ink-muted: #898781;
-  --color-hairline: #e1e0d9;
-  --color-axis: #c3c2b7;
+  /* Dark "black emerald" surface stack. `page` is the darkest layer, `surface`
+     the raised card on top of it, `elevated` the floating layer (header,
+     tooltips, popovers) that has to read above a card. */
+  --color-page: #040806;
+  --color-surface: #0b110f;
+  --color-elevated: #101815;
+  --color-ink: #e9f3ee;
+  --color-ink-secondary: #9db2aa;
+  --color-ink-muted: #6b8079;
+  --color-hairline: #1a2521;
+  --color-axis: #2b3a35;
 
-  --color-nav: #2a78d6;
-  --color-price: #eb6834;
+  --color-nav: #60a5fa;
+  --color-price: #fb923c;
 
-  /* Brand accent ("Teal Institutional") — used for links, active states, and
-     primary actions. Distinct from --color-nav/--color-price, which remain
-     the chart's fixed NAV/Price series colors. */
-  --color-primary: #0f766e;
-  --color-primary-soft: #ccfbf1;
-  --color-primary-ink: #042f2c;
+  /* Brand accent ("Emerald") — used for links, active states, and primary
+     actions. Distinct from --color-nav/--color-price, which remain the chart's
+     fixed NAV/Price series colors. */
+  --color-primary: #10b981;
+  --color-primary-soft: #06281f;
+  --color-primary-ink: #6ee7b7;
+  /* Text/icons sitting *on top of* a filled accent (primary, good, critical).
+     Those fills are light enough on this theme that white text would fail
+     contrast, so filled controls use near-black ink instead. */
+  --color-on-accent: #03120d;
 
-  --color-success: #006300;
-  --color-good: #0ca30c;
-  --color-warning: #fab219;
-  --color-serious: #ec835a;
-  --color-critical: #d03b3b;
+  --color-success: #34d399;
+  --color-good: #22c55e;
+  --color-warning: #fbbf24;
+  --color-serious: #fb923c;
+  --color-critical: #f87171;
+}
+
+html {
+  /* Renders native controls (select, checkbox, scrollbars) dark to match. */
+  color-scheme: dark;
 }
 
 body {
   background-color: var(--color-page);
   color: var(--color-ink);
   font-variant-numeric: normal;
+}
+
+::selection {
+  background-color: color-mix(in oklab, var(--color-primary) 35%, transparent);
+  color: var(--color-ink);
 }
 
 .tabular-nums {

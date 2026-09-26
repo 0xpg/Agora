@@ -14,7 +14,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts'
 import type { NavPoint } from '@/types/market'
-import { CHART_COLORS } from '@/utils/chartColors'
+import { CHART_COLORS, CHART_FILLS } from '@/utils/chartColors'
 
 const props = withDefaults(
   defineProps<{
@@ -108,8 +108,8 @@ function buildChart() {
     const area = chart.value.addSeries(AreaSeries, {
       lineColor: CHART_COLORS.primary,
       lineWidth: 2,
-      topColor: 'rgba(15, 118, 110, 0.2)',
-      bottomColor: 'rgba(15, 118, 110, 0)',
+      topColor: CHART_FILLS.primaryTop,
+      bottomColor: CHART_FILLS.primaryBottom,
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
@@ -122,8 +122,8 @@ function buildChart() {
       ? chart.value.addSeries(AreaSeries, {
           lineColor: CHART_COLORS.price,
           lineWidth: 2,
-          topColor: 'rgba(235, 104, 52, 0.16)',
-          bottomColor: 'rgba(235, 104, 52, 0)',
+          topColor: CHART_FILLS.priceTop,
+          bottomColor: CHART_FILLS.priceBottom,
           title: 'Price',
         })
       : null
@@ -177,18 +177,18 @@ watch(
   <div class="relative flex h-full w-full flex-col">
     <div v-if="!compact && priceSeries" class="mb-2 flex items-center gap-4 text-xs text-ink-secondary">
       <span class="inline-flex items-center gap-1.5">
-        <span class="h-2 w-2 rounded-full" style="background-color: #eb6834" />
+        <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: CHART_COLORS.price }" />
         Price
       </span>
       <span class="inline-flex items-center gap-1.5">
-        <span class="h-0.5 w-3 rounded-full border-t-2 border-dashed" style="border-color: #2a78d6" />
+        <span class="h-0.5 w-3 rounded-full border-t-2 border-dashed" :style="{ borderColor: CHART_COLORS.nav }" />
         Reference NAV
       </span>
     </div>
     <div ref="container" class="min-h-0 flex-1" />
     <div
       v-if="!compact && tooltip.visible"
-      class="pointer-events-none absolute z-10 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-xs shadow-lg"
+      class="pointer-events-none absolute z-10 rounded-md border border-hairline bg-elevated px-2.5 py-1.5 text-xs shadow-xl shadow-black/60"
       :style="{ left: `${tooltip.x + 12}px`, top: `${tooltip.y + 12}px` }"
     >
       <div class="font-medium text-ink">{{ tooltip.date }}</div>
