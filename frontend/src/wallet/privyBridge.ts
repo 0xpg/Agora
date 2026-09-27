@@ -1,4 +1,4 @@
-import { createElement, useEffect, type FunctionComponent } from 'react'
+import { createElement, useEffect, useState, type FunctionComponent } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   PrivyProvider,
@@ -8,6 +8,7 @@ import {
   useModalStatus,
   usePrivy,
   useWallets,
+  type ConnectedWallet,
 } from '@privy-io/react-auth'
 import { TARGET_CHAIN } from '@/config/chain'
 import { readThemeColor } from '@/utils/themeTokens'
@@ -26,6 +27,50 @@ function isUserCancellation(code: string): boolean {
 }
 
 /**
+ * Makes the wallet forget this site, so reconnecting asks for approval again
+ * instead of Privy silently picking the still-authorized wallet back up.
+ * Privy's own disconnect only closes WalletConnect sessions — for MetaMask and
+ * other browser extensions it just logs a warning — so extensions are asked to
+ * revoke the account permission (EIP-2255) as well.
+ */
+async function forgetWallet(wallet: ConnectedWallet) {
+  if (wallet.walletClientType === 'privy') return
+  if (wallet.connectorType === 'injected') {
+    try {
+      const provider = await wallet.getEthereumProvider()
+      await provider.request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] })
+    } catch (err) {
+      console.warn(`Could not revoke ${wallet.walletClientType} permissions:`, err)
+    }
+  }
+  wallet.disconnect()
+}
+
+// Not every extension supports revoking, and one that does not stays connected
+// underneath. So Agora also hides the wallet itself until the user signs in
+// again through Privy's modal — remembered across reloads, where Privy would
+// otherwise bring it back. Storage can be unavailable (private mode, blocked
+// site data); then the flag lasts only for this visit.
+const SIGNED_OUT_KEY = 'agora:wallet-signed-out'
+
+function readSignedOut(): boolean {
+  try {
+    return localStorage.getItem(SIGNED_OUT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeSignedOut(signedOut: boolean) {
+  try {
+    if (signedOut) localStorage.setItem(SIGNED_OUT_KEY, '1')
+    else localStorage.removeItem(SIGNED_OUT_KEY)
+  } catch {
+    // Not persisted; the in-memory flag still covers this visit.
+  }
+}
+
+/**
  * Renders nothing. Its only job is to read Privy's hooks and push what they say
  * into the Pinia store, so Vue components never touch React.
  */
@@ -33,8 +78,18 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
   const { ready, authenticated, user, logout } = usePrivy()
   const { wallets, ready: walletsReady } = useWallets()
   const { isOpen } = useModalStatus()
+
+  const [signedOut, setSignedOutState] = useState(readSignedOut)
+  function setSignedOut(next: boolean) {
+    writeSignedOut(next)
+    setSignedOutState(next)
+  }
+
   const { connectOrCreateWallet } = useConnectOrCreateWallet({
-    onSuccess: () => store.reportError(null),
+    onSuccess: () => {
+      setSignedOut(false)
+      store.reportError(null)
+    },
     onError: (code) => {
       if (isUserCancellation(code)) return
       // The raw Privy code means nothing to an investor, so it goes to the
@@ -58,7 +113,12 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
   })
   const { createWallet } = useCreateWallet()
 
-  const wallet = wallets[0]
+  // An email or social sign-in also counts as coming back.
+  useEffect(() => {
+    if (authenticated) setSignedOut(false)
+  }, [authenticated])
+
+  const wallet = signedOut ? undefined : wallets[0]
   const address = wallet?.address ?? null
   const chainId = wallet ? parseCaip2ChainId(wallet.chainId) : null
 
@@ -86,11 +146,11 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
           })
       },
       // Privy's logout ends the account session, but an external wallet
-      // connected without authenticating outlives it, so drop that too. Some
-      // clients (MetaMask, Phantom) cannot be disconnected programmatically and
-      // will no-op here; logout still clears Agora's own session.
+      // connected without authenticating outlives it, so every connected
+      // wallet is released too — not just the one on screen.
       disconnect: async () => {
-        wallet?.disconnect()
+        setSignedOut(true)
+        await Promise.all(wallets.map(forgetWallet))
         await logout()
       },
       switchChain: (id) => {
@@ -102,7 +162,7 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
         return wallet.getEthereumProvider()
       },
     })
-  }, [store, authenticated, user, connectOrCreateWallet, connectWallet, createWallet, logout, wallet])
+  }, [store, authenticated, user, connectOrCreateWallet, connectWallet, createWallet, logout, wallet, wallets])
 
   return null
 }

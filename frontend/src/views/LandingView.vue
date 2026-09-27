@@ -3,6 +3,7 @@ import { computed, type Directive } from 'vue'
 import { RouterLink } from 'vue-router'
 import { mockAssets } from '@/data/mockAssets'
 import { mockInvestor } from '@/data/mockInvestor'
+import { useWalletStore } from '@/stores/wallet'
 import { TARGET_CHAIN_NAME } from '@/config/chain'
 import { premiumDiscountPct } from '@/utils/pricing'
 import { formatBps, formatCurrency, formatPercent } from '@/utils/format'
@@ -54,6 +55,10 @@ const FOOTER_LINKS = [
   { to: '/portfolio', label: 'Portfolio' },
   { to: '/docs', label: 'Docs' },
 ] as const
+
+// Sign-in starts here — gated links open the wallet modal via the access guard —
+// so its failures need somewhere to show; the app header is not on this page.
+const wallet = useWalletStore()
 
 const HEADLINE_WORDS = ['Real-world', 'assets,', 'made', 'discoverable', 'and'] as const
 
@@ -160,6 +165,9 @@ function trackPointer(event: PointerEvent) {
           <RouterLink to="/markets" class="cta-primary text-sm">Enter Agora</RouterLink>
         </div>
       </div>
+      <p v-if="wallet.error" role="alert" class="border-t border-critical/30 bg-critical/15 px-6 py-2 text-xs text-critical">
+        {{ wallet.error }}
+      </p>
     </header>
 
     <section class="mx-auto max-w-5xl px-6 pt-20 pb-14 text-center sm:pt-28">
@@ -287,7 +295,7 @@ function trackPointer(event: PointerEvent) {
       >
         <h2 class="text-2xl font-semibold text-ink sm:text-3xl">Start with the markets.</h2>
         <p class="mx-auto mt-3 max-w-md text-sm text-ink-secondary">
-          No wallet needed to look around — connect only when you're ready to place an order into a round.
+          Sign in with your wallet or email to browse live markets and place orders into a round.
         </p>
         <RouterLink to="/markets" class="cta-primary mt-7 inline-flex text-sm">Enter Agora</RouterLink>
       </div>

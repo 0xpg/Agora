@@ -5,12 +5,16 @@ import { createPinia } from 'pinia'
 
 import App from './App.vue'
 import router from './router'
+import { installAccessGuard } from './router/access'
 import { useWalletStore } from './stores/wallet'
 
 const app = createApp(App)
 const pinia = createPinia()
 
 app.use(pinia)
+// The guard must be in place before the router resolves the first route.
+const wallet = useWalletStore(pinia)
+installAccessGuard(router, wallet)
 app.use(router)
 
 app.mount('#app')
@@ -19,7 +23,6 @@ app.mount('#app')
 // mount — the first paint never waits on it. It still loads unprompted rather
 // than on first click, because that is what restores a stored session (and the
 // active address) on every visit.
-const wallet = useWalletStore(pinia)
 void import('./wallet/privyBridge')
   .then(({ mountPrivyBridge }) => mountPrivyBridge(wallet))
   .catch(() => wallet.reportUnavailable("Wallet sign-in didn't load. Refresh the page to try again."))

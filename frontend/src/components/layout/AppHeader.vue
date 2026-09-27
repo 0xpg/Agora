@@ -31,8 +31,8 @@ function closeMobileNav() {
   mobileNavOpen.value = false
 }
 
-// Every page is browsable without a wallet, so disconnecting leaves the user
-// where they are — the header simply falls back to "Connect Wallet".
+// Disconnecting signs the investor out; the access guard then returns them
+// from any gated page to the homepage.
 async function disconnect() {
   await wallet.disconnect()
 }
