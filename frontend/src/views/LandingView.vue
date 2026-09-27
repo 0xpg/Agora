@@ -8,6 +8,7 @@ import { TARGET_CHAIN_NAME } from '@/config/chain'
 import { premiumDiscountPct } from '@/utils/pricing'
 import { formatBps, formatCurrency, formatPercent } from '@/utils/format'
 import AssetCard from '@/components/AssetCard.vue'
+import AppFooter from '@/components/layout/AppFooter.vue'
 import LandingGlobe from '@/components/LandingGlobe.vue'
 import SummaryMetrics, { type MetricItem } from '@/components/SummaryMetrics.vue'
 
@@ -47,13 +48,6 @@ const HOW_IT_WORKS = [
     title: 'Get your settlement or refund',
     body: "Once the round closes, your order settles, partially fills, or is refunded — you'll see the result and any funds returned.",
   },
-] as const
-
-const FOOTER_LINKS = [
-  { to: '/markets', label: 'Markets' },
-  { to: '/trade', label: 'Trade' },
-  { to: '/portfolio', label: 'Portfolio' },
-  { to: '/docs', label: 'Docs' },
 ] as const
 
 // Sign-in starts here — gated links open the wallet modal via the access guard —
@@ -139,7 +133,10 @@ function trackPointer(event: PointerEvent) {
 </script>
 
 <template>
-  <div class="relative isolate overflow-hidden bg-page">
+  <!-- overflow-clip, not overflow-hidden: it trims the oversized globe the same
+       way but does not make this a scroll container, which would stop the
+       sticky header from pinning to the viewport. -->
+  <div class="relative isolate overflow-clip bg-page">
     <!-- Ambient backdrop: the turning globe, over its own halo. Purely
          decorative, so it sits behind everything and ignores the pointer. -->
     <div class="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[920px] overflow-hidden" aria-hidden="true">
@@ -162,6 +159,9 @@ function trackPointer(event: PointerEvent) {
           <a href="#how-it-works" class="hidden text-sm font-medium text-ink-secondary transition hover:text-primary sm:inline">
             How it works
           </a>
+          <RouterLink to="/docs" class="hidden text-sm font-medium text-ink-secondary transition hover:text-primary sm:inline">
+            Docs
+          </RouterLink>
           <RouterLink to="/markets" class="cta-primary text-sm">Enter Agora</RouterLink>
         </div>
       </div>
@@ -301,18 +301,7 @@ function trackPointer(event: PointerEvent) {
       </div>
     </section>
 
-    <footer class="border-t border-hairline">
-      <div
-        class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-xs text-ink-muted sm:flex-row"
-      >
-        <span>&copy; 2026 Agora.</span>
-        <nav class="flex flex-wrap items-center justify-center gap-4">
-          <RouterLink v-for="link in FOOTER_LINKS" :key="link.to" :to="link.to" class="transition hover:text-primary">
-            {{ link.label }}
-          </RouterLink>
-        </nav>
-      </div>
-    </footer>
+    <AppFooter />
   </div>
 </template>
 

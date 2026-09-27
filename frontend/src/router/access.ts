@@ -39,10 +39,11 @@ export function installAccessGuard(router: Router, wallet: WalletStore) {
     if (wallet.connected) return true
 
     pendingPath = to.fullPath
-    // A click on the landing page is a request to sign in, so answer it with
-    // the modal and stay put. A direct visit (typed URL, bookmark, reload)
-    // lands on the homepage first — no modal the visitor did not ask for.
-    if (from.name === 'landing') {
+    // A click from a page already open (the homepage, or the public docs) is a
+    // request to sign in, so answer it with the modal and stay put. A direct
+    // visit (typed URL, bookmark, reload) has no page to stay on, so it lands
+    // on the homepage — no modal the visitor did not ask for.
+    if (from.matched.length > 0) {
       wallet.connect()
       return false
     }
@@ -54,7 +55,7 @@ export function installAccessGuard(router: Router, wallet: WalletStore) {
     (connected) => {
       const route = router.currentRoute.value
       if (connected) {
-        if (pendingPath && route.name === 'landing') void router.push(pendingPath)
+        if (pendingPath && !route.meta.requiresAuth) void router.push(pendingPath)
         pendingPath = null
       } else if (wallet.ready && route.meta.requiresAuth) {
         // Signing out on a gated page sends the visitor back to the homepage.
