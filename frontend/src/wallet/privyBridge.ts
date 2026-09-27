@@ -37,7 +37,10 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
     onSuccess: () => store.reportError(null),
     onError: (code) => {
       if (isUserCancellation(code)) return
-      store.reportError(`Could not connect a wallet (${code}). Please try again.`)
+      // The raw Privy code means nothing to an investor, so it goes to the
+      // console for debugging and the banner speaks plainly.
+      console.warn('Privy connectOrCreateWallet failed:', code)
+      store.reportError(`We couldn't connect your wallet. Make sure it's unlocked and set to ${TARGET_CHAIN.name}, then try again.`)
     },
   })
 
@@ -46,9 +49,11 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
   // createOnLogin was set, or an external wallet linked on another visit — needs
   // its own route to one.
   const { connectWallet } = useConnectWallet({
+    onSuccess: () => store.reportError(null),
     onError: (code) => {
       if (isUserCancellation(code)) return
-      store.reportError(`Could not reconnect your wallet (${code}). Please try again.`)
+      console.warn('Privy connectWallet failed:', code)
+      store.reportError("Your wallet didn't respond. Open it, make sure it's unlocked, then click Connect Wallet again.")
     },
   })
   const { createWallet } = useCreateWallet()
@@ -73,7 +78,12 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
         if (!authenticated) return connectOrCreateWallet()
         const linked = user?.wallet
         if (linked && linked.walletClientType !== 'privy') return connectWallet()
-        createWallet().catch(() => store.reportError('Could not create a wallet for your account. Please try again.'))
+        createWallet()
+          .then(() => store.reportError(null))
+          .catch((err: unknown) => {
+            console.warn('Privy createWallet failed:', err)
+            store.reportError("We couldn't set up your wallet just now. Please try again in a moment.")
+          })
       },
       // Privy's logout ends the account session, but an external wallet
       // connected without authenticating outlives it, so drop that too. Some
@@ -106,7 +116,8 @@ const PrivySync: FunctionComponent<{ store: WalletStore }> = ({ store }) => {
 export function mountPrivyBridge(store: WalletStore) {
   const appId = import.meta.env.VITE_PRIVY_APP_ID
   if (!appId) {
-    store.reportUnavailable('Wallet onboarding is unavailable: VITE_PRIVY_APP_ID is not set.')
+    console.error('Wallet onboarding is disabled: VITE_PRIVY_APP_ID is not set.')
+    store.reportUnavailable('Wallet sign-in is temporarily unavailable. Please check back soon.')
     return
   }
 

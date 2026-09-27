@@ -106,7 +106,7 @@ export const useWalletStore = defineStore('wallet', () => {
     try {
       await driver.switchChain(TARGET_CHAIN_ID)
     } catch {
-      error.value = `Could not switch to ${TARGET_CHAIN_NAME}. Approve the request in your wallet, or switch networks there yourself.`
+      error.value = `Your wallet is still on another network. Approve the switch to ${TARGET_CHAIN_NAME} in your wallet, or change it there.`
     } finally {
       switching.value = false
     }
