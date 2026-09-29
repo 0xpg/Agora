@@ -18,19 +18,6 @@ export type KycStatus = 'verified' | 'pending' | 'unverified'
 
 export type MarketStatus = 'open' | 'restricted' | 'paused'
 
-// A batch auction round: orders accumulate while 'open' and clear once it closes.
-export type RoundStatus = 'open' | 'closed' | 'settling'
-
-export type OrderSide = 'buy' | 'sell'
-
-export type OrderStatus =
-  | 'pending'
-  | 'partially_filled'
-  | 'unmatched'
-  | 'cancelled'
-  | 'refunded'
-  | 'settled'
-
 export type PoolType = 'nav_managed' | 'standard'
 
 export type AssetClass =
@@ -78,21 +65,6 @@ export interface TokenizedAsset {
   rules: MarketRules
   navHistory: NavPoint[]
   priceHistory: NavPoint[]
-  roundClosesAt: number // unix seconds; when the current batch auction round clears
-}
-
-export interface BatchOrder {
-  id: string
-  assetId: string
-  side: OrderSide
-  units: number
-  limitPrice: number
-  status: OrderStatus
-  createdAt: number // unix seconds
-  roundClosesAt: number // unix seconds; the round this order was submitted into
-  filledUnits: number
-  refundAmount: number
-  unmatchedAt?: number // unix seconds; set when the order first resolves unmatched, ahead of the 'refunded' transition
 }
 
 export interface Investor {

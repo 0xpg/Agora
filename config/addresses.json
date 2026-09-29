@@ -6,7 +6,7 @@
     "identityRegistryFactory": null,
     "navOracleFactory": null,
     "assetTokenFactory": null,
-    "batchAuctionMarketFactory": null,
+    "poolManager": null,
     "marketFactory": null,
     "markets": []
   }

@@ -84,12 +84,6 @@ function makeAsset(input: {
   const prevPrice = priceHistory[priceHistory.length - 2]!.value
   const change24hPct = ((lastPrice - prevPrice) / prevPrice) * 100
 
-  // Stagger each asset's batch-auction round so countdowns don't all line up —
-  // 3 to 12 minutes out from module load, deterministic per asset id.
-  const roundRand = mulberry32(hashSeed(`${input.id}-round`))
-  const roundOffsetSeconds = 180 + Math.floor(roundRand() * (720 - 180))
-  const roundClosesAt = Math.floor(Date.now() / 1000) + roundOffsetSeconds
-
   return {
     id: input.id,
     symbol: input.symbol,
@@ -114,7 +108,6 @@ function makeAsset(input: {
     rules: input.rules,
     navHistory,
     priceHistory,
-    roundClosesAt,
   }
 }
 

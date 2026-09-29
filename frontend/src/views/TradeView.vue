@@ -5,18 +5,15 @@ import { getAssetById, getDefaultTradeAsset } from '@/data/mockAssets'
 import { mockInvestor } from '@/data/mockInvestor'
 import { ELIGIBILITY_TIER_LABEL } from '@/types/market'
 import { eligibilityState } from '@/composables/useEligibility'
-import { useOrdersStore } from '@/stores/orders'
-import { roundStatusFor } from '@/utils/roundStatus'
 import { premiumDiscountPct } from '@/utils/pricing'
 import { formatBps, formatCompactNumber, formatCurrency, formatMaturity, formatPercent, formatRate } from '@/utils/format'
 import MarketStatusBadge from '@/components/MarketStatusBadge.vue'
-import RoundStatusBadge from '@/components/RoundStatusBadge.vue'
 import EligibilityBadge from '@/components/EligibilityBadge.vue'
 import MarketRulesPanel from '@/components/MarketRulesPanel.vue'
 import PriceVsNavChart from '@/components/PriceVsNavChart.vue'
 import SummaryMetrics, { type MetricItem } from '@/components/SummaryMetrics.vue'
 import AssetInfoRows, { type InfoRow } from '@/components/AssetInfoRows.vue'
-import BatchOrderPanel from '@/components/BatchOrderPanel.vue'
+import SwapPanel from '@/components/SwapPanel.vue'
 
 const route = useRoute()
 const requestedAsset = computed(() => (route.params.id ? getAssetById(String(route.params.id)) : undefined))
@@ -24,9 +21,7 @@ const notFound = computed(() => Boolean(route.params.id) && !requestedAsset.valu
 const asset = computed(() => requestedAsset.value ?? getDefaultTradeAsset())
 const investor = computed(() => mockInvestor)
 
-const ordersStore = useOrdersStore()
 const eligibility = computed(() => eligibilityState(asset.value, investor.value))
-const roundStatus = computed(() => roundStatusFor(asset.value, ordersStore.now))
 const premium = computed(() => premiumDiscountPct(asset.value))
 
 const TIMEFRAMES = [
@@ -111,7 +106,7 @@ const infoRows = computed<InfoRow[]>(() => [
 
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div class="lg:col-span-1">
-          <BatchOrderPanel :asset="asset" :investor="investor" />
+          <SwapPanel :asset="asset" :investor="investor" />
         </div>
 
         <div class="lg:col-span-2">
@@ -137,7 +132,6 @@ const infoRows = computed<InfoRow[]>(() => [
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <MarketStatusBadge :status="asset.marketStatus" />
-              <RoundStatusBadge :status="roundStatus" />
               <div class="flex rounded-md border border-hairline p-0.5 text-xs">
                 <button
                   v-for="tf in TIMEFRAMES"

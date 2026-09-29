@@ -26,8 +26,8 @@ const VALUE_PROPS = [
     body: "See how each asset's market price compares to its reference NAV, with full price history alongside it.",
   },
   {
-    title: 'Batch-Auction Settlement',
-    body: 'Orders enter a timed round and settle against a fair, uniform clearing price once it closes — this is not an instant swap.',
+    title: 'NAV-Guarded AMM',
+    body: 'Swaps execute immediately while the Agora hook keeps price inside the issuer-defined NAV band.',
   },
 ] as const
 
@@ -41,12 +41,12 @@ const HOW_IT_WORKS = [
     body: 'Every asset lists its required investor tier and KYC status, so you always know where you stand before trading.',
   },
   {
-    title: 'Submit an order into a round',
-    body: 'Place a buy or sell order with a limit price. It enters the current batch auction round instead of executing immediately.',
+    title: 'Review the live quote',
+    body: 'Choose an amount and review the pool price, NAV, fee, and expected output.',
   },
   {
     title: 'Get your settlement or refund',
-    body: "Once the round closes, your order settles, partially fills, or is refunded — you'll see the result and any funds returned.",
+    body: 'Approve and swap. The transaction reverts if eligibility, NAV freshness, slippage, or the price band check fails.',
   },
 ] as const
 
@@ -176,7 +176,7 @@ function trackPointer(event: PointerEvent) {
           <span class="pulse-ring absolute inline-flex h-full w-full rounded-full bg-primary" />
           <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
         </span>
-        Batch-auction RWA exchange &middot; {{ TARGET_CHAIN_NAME }}
+        Permissioned RWA AMM &middot; {{ TARGET_CHAIN_NAME }}
       </div>
 
       <h1 class="mt-6 text-4xl font-semibold tracking-tight text-ink sm:text-6xl">
@@ -194,7 +194,7 @@ function trackPointer(event: PointerEvent) {
       </h1>
 
       <p class="hero-rise mx-auto mt-6 max-w-2xl text-lg text-ink-secondary" style="--reveal-delay: 500ms">
-        Explore tokenized assets, understand their value, and participate in transparent market rounds&mdash;all in one
+        Explore tokenized assets, compare pool price with NAV, and swap through transparent permissioned markets&mdash;all in one
         place.
       </p>
 
@@ -248,7 +248,7 @@ function trackPointer(event: PointerEvent) {
       <div v-reveal class="mb-8 text-center">
         <h2 class="text-2xl font-semibold text-ink sm:text-3xl">A glimpse of the markets</h2>
         <p class="mt-2 text-sm text-ink-secondary">
-          Real assets, real batch-auction rounds &mdash; this is what you'll see inside.
+          Real assets, live NAV-guarded liquidity &mdash; this is what you'll see inside.
         </p>
       </div>
       <SummaryMetrics v-reveal="80" :metrics="previewMetrics" class="mb-6" />
@@ -295,7 +295,7 @@ function trackPointer(event: PointerEvent) {
       >
         <h2 class="text-2xl font-semibold text-ink sm:text-3xl">Start with the markets.</h2>
         <p class="mx-auto mt-3 max-w-md text-sm text-ink-secondary">
-          Sign in with your wallet or email to browse live markets and place orders into a round.
+          Sign in with your wallet or email to browse live markets and swap eligible assets.
         </p>
         <RouterLink to="/markets" class="cta-primary mt-7 inline-flex text-sm">Enter Agora</RouterLink>
       </div>

@@ -1,7 +1,0 @@
-[package]
-name = "solvency"
-type = "bin"
-authors = ["0xpg"]
-compiler_version = ">=1.0.0"
-
-[dependencies]

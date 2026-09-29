@@ -4,18 +4,14 @@ import type { Investor, TokenizedAsset } from '@/types/market'
 import { eligibilityState } from '@/composables/useEligibility'
 import { formatCurrency, formatPercent } from '@/utils/format'
 import { premiumDiscountPct } from '@/utils/pricing'
-import { roundStatusFor, formatCountdown } from '@/utils/roundStatus'
-import { useOrdersStore } from '@/stores/orders'
 import PriceVsNavChart from '@/components/PriceVsNavChart.vue'
 import EligibilityBadge from '@/components/EligibilityBadge.vue'
-import RoundStatusBadge from '@/components/RoundStatusBadge.vue'
 
 defineProps<{
   assets: TokenizedAsset[]
   investor: Investor
 }>()
 
-const ordersStore = useOrdersStore()
 </script>
 
 <template>
@@ -32,7 +28,7 @@ const ordersStore = useOrdersStore()
             <th class="px-4 py-3 text-right font-medium">24h</th>
             <th class="w-28 px-4 py-3 font-medium">Trend</th>
             <th class="px-4 py-3 font-medium">Eligibility</th>
-            <th class="px-4 py-3 font-medium">Round</th>
+            <th class="px-4 py-3 font-medium">Market</th>
           </tr>
         </thead>
         <tbody>
@@ -79,10 +75,7 @@ const ordersStore = useOrdersStore()
                 <EligibilityBadge :state="eligibilityState(asset, investor)" />
               </td>
               <td class="px-4 py-3">
-                <RoundStatusBadge :status="roundStatusFor(asset, ordersStore.now)" />
-                <div v-if="roundStatusFor(asset, ordersStore.now) === 'open'" class="mt-1 text-xs tabular-nums text-ink-muted">
-                  Closes in {{ formatCountdown(Math.max(0, asset.roundClosesAt - ordersStore.now)) }}
-                </div>
+                <span class="text-xs font-medium text-success">AMM live</span>
               </td>
             </tr>
           </RouterLink>

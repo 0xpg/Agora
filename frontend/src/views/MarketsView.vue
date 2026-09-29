@@ -55,7 +55,7 @@ const view = ref<'cards' | 'list'>('cards')
   <div class="mx-auto max-w-6xl px-6 py-8">
     <div class="mb-6 flex flex-col gap-1">
       <h1 class="text-xl font-semibold text-ink">Markets</h1>
-      <p class="text-sm text-ink-muted">Discover tokenized assets and their current batch auction rounds.</p>
+      <p class="text-sm text-ink-muted">Discover tokenized assets trading in permissioned NAV-guarded AMM pools.</p>
     </div>
 
     <SummaryMetrics :metrics="metrics" class="mb-6" />
