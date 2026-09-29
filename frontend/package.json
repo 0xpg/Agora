@@ -12,7 +12,8 @@
     "lint": "run-s \"lint:*\"",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
-    "format": "prettier --write --experimental-cli src/"
+    "format": "prettier --write --experimental-cli src/",
+    "deploy": "cf deploy"
   },
   "dependencies": {
     "@privy-io/react-auth": "^3.45.0",
@@ -31,6 +32,7 @@
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "beta",
     "@tsconfig/node24": "^24.0.5",
     "@types/node": "^24.13.4",
     "@types/react": "^19.3.0",
@@ -38,6 +40,7 @@
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/eslint-config-typescript": "^14.9.0",
     "@vue/tsconfig": "^0.9.1",
+    "cf": "^1.0.0-beta.5",
     "eslint": "^10.10.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-oxlint": "~1.82.0",
