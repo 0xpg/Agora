@@ -7,7 +7,10 @@ Each market pairs concentrated AMM liquidity with a permissioned asset adapter, 
 - rejects swaps while the issuer NAV is stale or trading is paused;
 - rejects initialization and swaps outside the active NAV price band;
 - requires the band to be re-synced after every NAV update; and
-- increases LP fees from `baseFee` at the band midpoint to `edgeFee` at either edge.
+- increases LP fees as inventory moves away from its target;
+- permits only rebalancing trades beyond the directional guard;
+- caps individual swaps and requires fresher NAV for large swaps; and
+- supports narrower, higher-fee emergency policies that expire automatically.
 
 Eligibility is not inferred from `msg.sender` inside the hook because v4 normally sees a router. Agora reuses Uniswap v4 periphery's `PermissionsAdapter`, permissioned router, and `PermissionedPositionManager`. `AgoraAllowlistChecker` maps the issuer-controlled EAS eligibility result to both swap and liquidity permissions. There is no ZK proof path: this is an explicitly permissioned market.
 
@@ -19,8 +22,8 @@ eligible user -> permissioned router -> PermissionsAdapter -> PoolManager -> Ago
 
 | Contract | Responsibility |
 |---|---|
-| `AgoraHook` | NAV freshness, synchronized price band, dynamic fee, pause |
-| `AgoraAllowlistChecker` | Agora eligibility → v4 permission flags |
+| `AgoraHook` | NAV band, inventory target, dynamic fee, trade caps, directional guard, pause |
+| `AgoraAllowlistChecker` | EAS investor tier → v4 swap/liquidity permissions |
 | Uniswap `PermissionsAdapter` | Safely wraps the permissioned asset for `PoolManager` custody |
 | Uniswap permissioned router | Checks the actual trader and wraps/unwraps the asset |
 | Uniswap `PermissionedPositionManager` | Eligibility-gated, non-transferable LP positions |
@@ -56,6 +59,7 @@ For an existing clone, fetch dependencies with `git submodule update --init --re
 CI runs `forge fmt --check`, `forge build --sizes`, and `forge test -vvv`.
 
 The frontend is a Vue demo. Its swap button is deliberately non-transactional until deployed router, adapter, hook, and pool addresses are added to `config/addresses.json`.
+Privy provides wallet and email onboarding; contracts continue to enforce EAS eligibility against the resulting wallet address.
 
 ## Production gaps
 

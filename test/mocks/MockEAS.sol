@@ -14,6 +14,30 @@ contract MockEAS is IEAS {
         uint64 expirationTime,
         uint64 revocationTime
     ) external {
+        _register(uid, schema, recipient, attester, expirationTime, revocationTime, "");
+    }
+
+    function registerWithData(
+        bytes32 uid,
+        bytes32 schema,
+        address recipient,
+        address attester,
+        uint64 expirationTime,
+        uint64 revocationTime,
+        bytes calldata data
+    ) external {
+        _register(uid, schema, recipient, attester, expirationTime, revocationTime, data);
+    }
+
+    function _register(
+        bytes32 uid,
+        bytes32 schema,
+        address recipient,
+        address attester,
+        uint64 expirationTime,
+        uint64 revocationTime,
+        bytes memory data
+    ) private {
         _attestations[uid] = Attestation({
             uid: uid,
             schema: schema,
@@ -24,7 +48,7 @@ contract MockEAS is IEAS {
             recipient: recipient,
             attester: attester,
             revocable: true,
-            data: ""
+            data: data
         });
     }
 

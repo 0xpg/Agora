@@ -10,6 +10,7 @@ contract IdentityRegistry is Ownable2Step, IEligibilityOracle {
     struct EligibilityRecord {
         bool eligible;
         uint64 validUntil;
+        uint8 tier;
     }
 
     IEAS public immutable eas;
@@ -73,12 +74,21 @@ contract IdentityRegistry is Ownable2Step, IEligibilityOracle {
         uint64 cacheBound = uint64(block.timestamp) + maxCacheAge;
         uint64 validUntil = allValid ? (earliestExpiry < cacheBound ? earliestExpiry : cacheBound) : 0;
 
-        eligibility[investor] = EligibilityRecord({eligible: allValid, validUntil: validUntil});
+        uint8 tier = allValid && attestationUIDs.length > 0 ? _tier(eas.getAttestation(attestationUIDs[0]).data) : 0;
+        eligibility[investor] = EligibilityRecord({eligible: allValid, validUntil: validUntil, tier: tier});
         emit EligibilityRefreshed(investor, allValid, validUntil);
     }
 
     function isEligible(address investor) public view override returns (bool) {
         EligibilityRecord memory r = eligibility[investor];
         return r.eligible && block.timestamp <= r.validUntil;
+    }
+
+    function tierOf(address investor) external view override returns (uint8) {
+        return isEligible(investor) ? eligibility[investor].tier : 0;
+    }
+
+    function _tier(bytes memory data) private pure returns (uint8) {
+        return data.length == 32 ? abi.decode(data, (uint8)) : 1;
     }
 }

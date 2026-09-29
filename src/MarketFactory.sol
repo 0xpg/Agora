@@ -36,7 +36,7 @@ contract MarketFactory {
         navOracle = navOracleFactory.deploy(msg.sender, navMaxStaleness);
 
         token = assetTokenFactory.deploy(name, symbol, address(this), identityRegistry);
-        allowlistChecker = address(new AgoraAllowlistChecker(token, IEligibilityOracle(identityRegistry)));
+        allowlistChecker = address(new AgoraAllowlistChecker(token, IEligibilityOracle(identityRegistry), msg.sender));
 
         PermissionedAssetToken deployedToken = PermissionedAssetToken(token);
         deployedToken.transferOwnership(msg.sender);

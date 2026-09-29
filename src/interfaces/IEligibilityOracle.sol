@@ -3,4 +3,6 @@ pragma solidity ^0.8.24;
 
 interface IEligibilityOracle {
     function isEligible(address trader) external view returns (bool);
+
+    function tierOf(address trader) external view returns (uint8);
 }

@@ -34,11 +34,34 @@ contract AgoraHook is IHooks, Ownable2Step {
     uint64 public bandNAVUpdatedAt;
     uint24 public baseFee;
     uint24 public edgeFee;
+    uint160 public targetSqrtPriceX96;
+    uint16 public directionalGuardBps;
+    uint256 public maxSwapAmount;
+    uint256 public largeSwapAmount;
+    uint64 public largeSwapMaxStaleness;
     bool public paused;
+
+    struct TemporaryPolicy {
+        uint160 lowerSqrtPriceX96;
+        uint160 upperSqrtPriceX96;
+        uint24 baseFee;
+        uint24 edgeFee;
+        uint64 expiresAt;
+    }
+
+    TemporaryPolicy public temporaryPolicy;
 
     event PriceBandSynced(uint160 lowerSqrtPriceX96, uint160 upperSqrtPriceX96, uint64 navUpdatedAt);
     event FeesUpdated(uint24 baseFee, uint24 edgeFee);
     event PausedSet(bool paused);
+    event RiskControlsUpdated(
+        uint160 targetSqrtPriceX96,
+        uint16 directionalGuardBps,
+        uint256 maxSwapAmount,
+        uint256 largeSwapAmount,
+        uint64 largeSwapMaxStaleness
+    );
+    event TemporaryPolicyUpdated(uint160 lower, uint160 upper, uint24 baseFee, uint24 edgeFee, uint64 expiresAt);
 
     error NotPoolManager();
     error WrongPool();
@@ -46,6 +69,8 @@ contract AgoraHook is IHooks, Ownable2Step {
     error UnsyncedPriceBand();
     error PriceOutsideBand();
     error SwapsPaused();
+    error SwapTooLarge();
+    error RebalanceOnly();
 
     modifier onlyPoolManager() {
         if (msg.sender != address(poolManager)) revert NotPoolManager();
@@ -98,6 +123,7 @@ contract AgoraHook is IHooks, Ownable2Step {
         (, uint64 updatedAt) = navOracle.getNAV();
         lowerSqrtPriceX96 = lower;
         upperSqrtPriceX96 = upper;
+        if (targetSqrtPriceX96 == 0) targetSqrtPriceX96 = uint160((uint256(lower) + upper) / 2);
         bandNAVUpdatedAt = updatedAt;
         emit PriceBandSynced(lower, upper, updatedAt);
     }
@@ -109,6 +135,37 @@ contract AgoraHook is IHooks, Ownable2Step {
     function setPaused(bool _paused) external onlyOwner {
         paused = _paused;
         emit PausedSet(_paused);
+    }
+
+    function setRiskControls(
+        uint160 target,
+        uint16 guardBps,
+        uint256 _maxSwapAmount,
+        uint256 _largeSwapAmount,
+        uint64 _largeSwapMaxStaleness
+    ) external onlyOwner {
+        require(target > lowerSqrtPriceX96 && target < upperSqrtPriceX96 && guardBps <= 10_000, "bad risk controls");
+        require(_largeSwapAmount == 0 || _largeSwapAmount <= _maxSwapAmount, "bad large swap");
+        targetSqrtPriceX96 = target;
+        directionalGuardBps = guardBps;
+        maxSwapAmount = _maxSwapAmount;
+        largeSwapAmount = _largeSwapAmount;
+        largeSwapMaxStaleness = _largeSwapMaxStaleness;
+        emit RiskControlsUpdated(target, guardBps, _maxSwapAmount, _largeSwapAmount, _largeSwapMaxStaleness);
+    }
+
+    function setTemporaryPolicy(uint160 lower, uint160 upper, uint24 _baseFee, uint24 _edgeFee, uint64 expiresAt)
+        external
+        onlyOwner
+    {
+        require(
+            lower > 0 && upper > lower && targetSqrtPriceX96 > lower && targetSqrtPriceX96 < upper
+                && expiresAt > block.timestamp,
+            "bad temporary policy"
+        );
+        require(_baseFee <= _edgeFee && _edgeFee <= LPFeeLibrary.MAX_LP_FEE, "bad fees");
+        temporaryPolicy = TemporaryPolicy(lower, upper, _baseFee, _edgeFee, expiresAt);
+        emit TemporaryPolicyUpdated(lower, upper, _baseFee, _edgeFee, expiresAt);
     }
 
     function beforeInitialize(address, PoolKey calldata key, uint160 sqrtPriceX96)
@@ -123,16 +180,19 @@ contract AgoraHook is IHooks, Ownable2Step {
         return IHooks.beforeInitialize.selector;
     }
 
-    function beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
+    function beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         external
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         if (paused) revert SwapsPaused();
         _checkPool(key);
-        _checkNAV();
+        uint256 amount = _absolute(params.amountSpecified);
+        if (maxSwapAmount != 0 && amount > maxSwapAmount) revert SwapTooLarge();
+        _checkNAV(amount);
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
         _checkPrice(sqrtPriceX96);
+        _checkDirection(sqrtPriceX96, params.zeroForOne);
         return (
             IHooks.beforeSwap.selector,
             BeforeSwapDeltaLibrary.ZERO_DELTA,
@@ -158,20 +218,54 @@ contract AgoraHook is IHooks, Ownable2Step {
     }
 
     function _checkNAV() private view {
+        _checkNAV(0);
+    }
+
+    function _checkNAV(uint256 amount) private view {
         if (navOracle.isStale()) revert StaleNAV();
         (, uint64 updatedAt) = navOracle.getNAV();
         if (updatedAt != bandNAVUpdatedAt) revert UnsyncedPriceBand();
+        if (
+            largeSwapAmount != 0 && amount >= largeSwapAmount
+                && block.timestamp > uint256(updatedAt) + largeSwapMaxStaleness
+        ) revert StaleNAV();
     }
 
     function _checkPrice(uint160 sqrtPriceX96) private view {
-        if (sqrtPriceX96 < lowerSqrtPriceX96 || sqrtPriceX96 > upperSqrtPriceX96) revert PriceOutsideBand();
+        (uint160 lower, uint160 upper,,) = activePolicy();
+        if (sqrtPriceX96 < lower || sqrtPriceX96 > upper) revert PriceOutsideBand();
     }
 
     function _feeAt(uint160 price) private view returns (uint24) {
-        uint256 midpoint = (uint256(lowerSqrtPriceX96) + upperSqrtPriceX96) / 2;
+        (uint160 lower, uint160 upper, uint24 activeBaseFee, uint24 activeEdgeFee) = activePolicy();
+        uint256 midpoint = targetSqrtPriceX96 == 0 ? (uint256(lower) + upper) / 2 : targetSqrtPriceX96;
         uint256 distance = price > midpoint ? price - midpoint : midpoint - price;
-        uint256 span = price > midpoint ? upperSqrtPriceX96 - midpoint : midpoint - lowerSqrtPriceX96;
-        return baseFee + uint24((uint256(edgeFee - baseFee) * distance) / span);
+        uint256 span = price > midpoint ? upper - midpoint : midpoint - lower;
+        if (distance > span) distance = span;
+        return activeBaseFee + uint24((uint256(activeEdgeFee - activeBaseFee) * distance) / span);
+    }
+
+    function activePolicy()
+        public
+        view
+        returns (uint160 lower, uint160 upper, uint24 activeBaseFee, uint24 activeEdgeFee)
+    {
+        TemporaryPolicy memory policy = temporaryPolicy;
+        if (policy.expiresAt > block.timestamp) {
+            return (policy.lowerSqrtPriceX96, policy.upperSqrtPriceX96, policy.baseFee, policy.edgeFee);
+        }
+        return (lowerSqrtPriceX96, upperSqrtPriceX96, baseFee, edgeFee);
+    }
+
+    function _checkDirection(uint160 price, bool zeroForOne) private view {
+        if (directionalGuardBps == 0 || targetSqrtPriceX96 == 0) return;
+        uint256 lowerTrigger = uint256(targetSqrtPriceX96) * (10_000 - directionalGuardBps) / 10_000;
+        uint256 upperTrigger = uint256(targetSqrtPriceX96) * (10_000 + directionalGuardBps) / 10_000;
+        if ((price <= lowerTrigger && zeroForOne) || (price >= upperTrigger && !zeroForOne)) revert RebalanceOnly();
+    }
+
+    function _absolute(int256 amount) private pure returns (uint256) {
+        return amount < 0 ? uint256(-(amount + 1)) + 1 : uint256(amount);
     }
 
     function _setFees(uint24 _baseFee, uint24 _edgeFee) private {
