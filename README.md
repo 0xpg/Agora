@@ -1,51 +1,41 @@
 # Agora
 
-Permissioned Uniswap v4 AMM liquidity for tokenized real-world assets.
+NAV-aware Uniswap v4 AMM liquidity for tokenized real-world assets.
 
-Each market pairs concentrated AMM liquidity with a permissioned asset adapter, a settlement token, and an `AgoraHook` that:
+Agora combines concentrated liquidity with issuer-defined market controls. `AgoraHook` provides:
 
-- rejects swaps while the issuer NAV is stale or trading is paused;
-- rejects initialization and swaps outside the active NAV price band;
-- requires the band to be re-synced after every NAV update; and
-- increases LP fees as inventory moves away from its target;
-- permits only rebalancing trades beyond the directional guard;
-- caps individual swaps and requires fresher NAV for large swaps; and
-- supports narrower, higher-fee emergency policies that expire automatically.
+- a NAV-linked trading range;
+- dynamic fees around a target price;
+- directional rebalancing when the pool moves outside its target zone;
+- per-swap limits and stricter NAV freshness for large trades;
+- issuer pause controls; and
+- temporary emergency parameters with automatic expiry.
 
-Eligibility is not inferred from `msg.sender` inside the hook because v4 normally sees a router. Agora reuses Uniswap v4 periphery's `PermissionsAdapter`, permissioned router, and `PermissionedPositionManager`. `AgoraAllowlistChecker` maps the issuer-controlled EAS eligibility result to both swap and liquidity permissions. There is no ZK proof path: this is an explicitly permissioned market.
+## Architecture
 
 ```text
-eligible user -> permissioned router -> PermissionsAdapter -> PoolManager -> AgoraHook
+Privy wallet -> permissioned router -> asset adapter -> Uniswap v4 PoolManager -> AgoraHook
 ```
 
-## Components
-
-| Contract | Responsibility |
+| Component | Responsibility |
 |---|---|
-| `AgoraHook` | NAV band, inventory target, dynamic fee, trade caps, directional guard, pause |
-| `AgoraAllowlistChecker` | EAS investor tier → v4 swap/liquidity permissions |
-| Uniswap `PermissionsAdapter` | Safely wraps the permissioned asset for `PoolManager` custody |
-| Uniswap permissioned router | Checks the actual trader and wraps/unwraps the asset |
-| Uniswap `PermissionedPositionManager` | Eligibility-gated, non-transferable LP positions |
-| `PermissionedAssetToken` | Issuer token and wallet-to-wallet transfer compliance |
-| `IdentityRegistry` | EAS-backed eligibility cache |
-| `NAVOracle` | Issuer NAV and staleness bound |
-| `MarketFactory` | Deploys the asset, registry, NAV oracle, and allowlist checker |
+| `AgoraHook` | Price bounds, dynamic fees, risk limits, and emergency controls |
+| `NAVOracle` | Issuer-published NAV and freshness policy |
+| `PermissionedAssetToken` | Token issuance and transfer restrictions |
+| `MarketFactory` | Deploys the contracts for a new market |
+| Privy | Wallet and email onboarding |
 
-## Market deployment
+Identity and compliance integration is intentionally deferred until the policy is finalized. Privy currently handles onboarding only.
 
-1. Deploy the shared Uniswap v4 permissioned-pool infrastructure.
-2. Call `MarketFactory.deployMarket` to create the Agora asset contracts.
-3. Create a verified `PermissionsAdapter` for the asset using `AgoraAllowlistChecker`.
-4. Mine and deploy `AgoraHook` at an address with `BEFORE_INITIALIZE`, `BEFORE_SWAP`, and `AFTER_SWAP` flags.
-5. Allow-list the hook on the adapter and enable swapping.
-6. Publish NAV, call `syncPriceBand`, initialize a dynamic-fee pool, and add concentrated liquidity through `PermissionedPositionManager`.
+## Market controls
 
-The price bounds passed to `syncPriceBand` are Uniswap `sqrt(token1/token0)` Q64.96 values and must include token decimal scaling. Updating NAV intentionally stops trading until matching bounds are published; this prevents a new NAV from silently using an old range.
+After publishing NAV, the issuer calls `syncPriceBand` with decimal-aware Uniswap Q64.96 square-root price bounds. A new NAV invalidates the previous band until this synchronization is complete.
 
-Do not exempt the shared `PoolManager` in `PermissionedAssetToken`. The adapter exists to avoid turning shared protocol custody into a global compliance bypass.
+`setRiskControls` configures the target price, directional guard, maximum swap amount, and the tighter freshness requirement for large swaps. `setTemporaryPolicy` applies short-lived bounds and fees that expire without a cleanup transaction.
 
-## Quick start
+Issuer ownership should be transferred to a Safe before production use.
+
+## Development
 
 ```shell
 git clone --recurse-submodules https://github.com/0xpg/Agora.git
@@ -54,16 +44,19 @@ forge build
 forge test -vv
 ```
 
-For an existing clone, fetch dependencies with `git submodule update --init --recursive`. Foundry remappings point at Uniswap v4 core/periphery and OpenZeppelin.
+For an existing clone:
+
+```shell
+git submodule update --init --recursive
+```
 
 CI runs `forge fmt --check`, `forge build --sizes`, and `forge test -vvv`.
 
-The frontend is a Vue demo. Its swap button is deliberately non-transactional until deployed router, adapter, hook, and pool addresses are added to `config/addresses.json`.
-Privy provides wallet and email onboarding; contracts continue to enforce EAS eligibility against the resulting wallet address.
+The Vue frontend uses Privy for wallet onboarding. Swap execution remains disabled until deployed pool, router, adapter, and hook addresses are added to `config/addresses.json`.
 
-## Production gaps
+## Before production
 
-- Add a CREATE2 hook-mining deployment script and full pool initialization script.
-- Connect the frontend to the deployed permissioned router and quote path.
-- Put issuer ownership behind a multisig/timelock.
-- Source NAV from a production-grade signed or attested feed.
+- Add CREATE2 hook deployment and pool initialization scripts.
+- Connect frontend quoting and execution to the permissioned router.
+- Finalize the identity and compliance policy.
+- Use a production-grade NAV feed.
