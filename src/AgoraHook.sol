@@ -181,17 +181,53 @@ contract AgoraHook is IHooks, Ownable2Step {
         emit FeesUpdated(_baseFee, _edgeFee);
     }
 
-    function afterInitialize(address, PoolKey calldata, uint160, int24) external pure returns (bytes4) { revert(); }
+    function afterInitialize(address, PoolKey calldata, uint160, int24) external pure returns (bytes4) {
+        revert();
+    }
+
     function beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        external pure returns (bytes4) { revert(); }
-    function afterAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, BalanceDelta, BalanceDelta, bytes calldata)
-        external pure returns (bytes4, BalanceDelta) { revert(); }
+        external
+        pure
+        returns (bytes4)
+    {
+        revert();
+    }
+
+    function afterAddLiquidity(
+        address,
+        PoolKey calldata,
+        ModifyLiquidityParams calldata,
+        BalanceDelta,
+        BalanceDelta,
+        bytes calldata
+    ) external pure returns (bytes4, BalanceDelta) {
+        revert();
+    }
+
     function beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        external pure returns (bytes4) { revert(); }
-    function afterRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, BalanceDelta, BalanceDelta, bytes calldata)
-        external pure returns (bytes4, BalanceDelta) { revert(); }
-    function beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
-        external pure returns (bytes4) { revert(); }
-    function afterDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
-        external pure returns (bytes4) { revert(); }
+        external
+        pure
+        returns (bytes4)
+    {
+        revert();
+    }
+
+    function afterRemoveLiquidity(
+        address,
+        PoolKey calldata,
+        ModifyLiquidityParams calldata,
+        BalanceDelta,
+        BalanceDelta,
+        bytes calldata
+    ) external pure returns (bytes4, BalanceDelta) {
+        revert();
+    }
+
+    function beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata) external pure returns (bytes4) {
+        revert();
+    }
+
+    function afterDonate(address, PoolKey calldata, uint256, uint256, bytes calldata) external pure returns (bytes4) {
+        revert();
+    }
 }

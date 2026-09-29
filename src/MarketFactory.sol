@@ -19,12 +19,7 @@ contract MarketFactory {
         address indexed issuer, address token, address navOracle, address identityRegistry, address allowlistChecker
     );
 
-    constructor(
-        address _eas,
-        address _identityRegistryFactory,
-        address _navOracleFactory,
-        address _assetTokenFactory
-    ) {
+    constructor(address _eas, address _identityRegistryFactory, address _navOracleFactory, address _assetTokenFactory) {
         eas = _eas;
         identityRegistryFactory = IdentityRegistryFactory(_identityRegistryFactory);
         navOracleFactory = NAVOracleFactory(_navOracleFactory);

@@ -15,12 +15,7 @@ contract Deploy is Script {
         address navOracleFactory = address(new NAVOracleFactory());
         address assetTokenFactory = address(new AssetTokenFactory());
 
-        factory = new MarketFactory(
-            easAddress,
-            identityRegistryFactory,
-            navOracleFactory,
-            assetTokenFactory
-        );
+        factory = new MarketFactory(easAddress, identityRegistryFactory, navOracleFactory, assetTokenFactory);
         vm.stopBroadcast();
 
         console.log("MarketFactory deployed at:", address(factory));

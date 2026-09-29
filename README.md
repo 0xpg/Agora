@@ -1,6 +1,6 @@
 # Agora
 
-Permissioned Uniswap v4 markets for tokenized real-world assets.
+Permissioned Uniswap v4 AMMs for tokenized real-world assets.
 
 Agora uses concentrated AMM liquidity rather than batch auctions. Each market pairs a permissioned asset adapter with a settlement token and an `AgoraHook` that:
 
@@ -9,7 +9,11 @@ Agora uses concentrated AMM liquidity rather than batch auctions. Each market pa
 - requires the band to be re-synced after every NAV update; and
 - increases LP fees from `baseFee` at the band midpoint to `edgeFee` at either edge.
 
-Eligibility is not inferred from `msg.sender` inside the hook because v4 normally sees a router. Agora reuses Uniswap v4 periphery's `PermissionsAdapter`, permissioned router, and `PermissionedPositionManager`. `AgoraAllowlistChecker` maps the existing `IEligibilityOracle` result to both swap and liquidity permissions.
+Eligibility is not inferred from `msg.sender` inside the hook because v4 normally sees a router. Agora reuses Uniswap v4 periphery's `PermissionsAdapter`, permissioned router, and `PermissionedPositionManager`. `AgoraAllowlistChecker` maps the issuer-controlled EAS eligibility result to both swap and liquidity permissions. There is no ZK proof path: this is an explicitly permissioned market.
+
+```text
+eligible user -> permissioned router -> PermissionsAdapter -> PoolManager -> AgoraHook
+```
 
 ## Components
 
@@ -38,14 +42,18 @@ The price bounds passed to `syncPriceBand` are Uniswap `sqrt(token1/token0)` Q64
 
 Do not exempt the shared `PoolManager` in `PermissionedAssetToken`. The adapter exists to avoid turning shared protocol custody into a global compliance bypass.
 
-## Build
+## Quick start
 
 ```shell
+git clone --recurse-submodules https://github.com/0xpg/Agora.git
+cd Agora
 forge build
 forge test -vv
 ```
 
-Dependencies are vendored under `lib/`; remappings point at Uniswap v4 core/periphery and OpenZeppelin.
+For an existing clone, fetch dependencies with `git submodule update --init --recursive`. Foundry remappings point at Uniswap v4 core/periphery and OpenZeppelin.
+
+CI runs `forge fmt --check`, `forge build --sizes`, and `forge test -vvv`.
 
 The frontend is a Vue demo. Its swap button is deliberately non-transactional until deployed router, adapter, hook, and pool addresses are added to `config/addresses.json`.
 
