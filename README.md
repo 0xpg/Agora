@@ -1,8 +1,8 @@
 # Agora
 
-NAV-aware Uniswap v4 AMM liquidity for tokenized real-world assets.
+NAV-anchored adaptive liquidity for tokenized real-world assets.
 
-Agora combines concentrated liquidity with issuer-defined market controls. `AgoraHook` provides:
+Agora is a concentrated-liquidity AMM with issuer-defined market controls. Its policy hook provides:
 
 - a NAV-linked trading range;
 - dynamic fees around a target price;
@@ -14,7 +14,7 @@ Agora combines concentrated liquidity with issuer-defined market controls. `Agor
 ## Architecture
 
 ```text
-Privy wallet -> permissioned router -> asset adapter -> Uniswap v4 PoolManager -> AgoraHook
+Privy wallet -> permissioned execution router -> asset adapter -> singleton pool manager -> policy hook
 ```
 
 | Component | Responsibility |
@@ -29,7 +29,7 @@ Identity and compliance integration is intentionally deferred until the policy i
 
 ## Market controls
 
-After publishing NAV, the issuer calls `syncPriceBand` with decimal-aware Uniswap Q64.96 square-root price bounds. A new NAV invalidates the previous band until this synchronization is complete.
+After publishing NAV, the issuer calls `syncPriceBand` with decimal-aware Q64.96 square-root price bounds. A new NAV invalidates the previous band until this synchronization is complete.
 
 `setRiskControls` configures the target price, directional guard, maximum swap amount, and the tighter freshness requirement for large swaps. `setTemporaryPolicy` applies short-lived bounds and fees that expire without a cleanup transaction.
 
