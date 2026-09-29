@@ -1,8 +1,8 @@
 # Agora
 
-Permissioned Uniswap v4 AMMs for tokenized real-world assets.
+Permissioned Uniswap v4 AMM liquidity for tokenized real-world assets.
 
-Agora uses concentrated AMM liquidity rather than batch auctions. Each market pairs a permissioned asset adapter with a settlement token and an `AgoraHook` that:
+Each market pairs concentrated AMM liquidity with a permissioned asset adapter, a settlement token, and an `AgoraHook` that:
 
 - rejects swaps while the issuer NAV is stale or trading is paused;
 - rejects initialization and swaps outside the active NAV price band;
