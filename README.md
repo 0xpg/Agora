@@ -22,10 +22,11 @@ Privy wallet -> permissioned execution router -> asset adapter -> singleton pool
 | `AgoraHook` | Price bounds, dynamic fees, risk limits, and emergency controls |
 | `NAVOracle` | Issuer-published NAV and freshness policy |
 | `PermissionedAssetToken` | Token issuance and transfer restrictions |
+| `IdentityRegistry` | Issuer-managed demo access list for Privy wallets |
 | `MarketFactory` | Deploys the contracts for a new market |
 | Privy | Wallet and email onboarding |
 
-Identity and compliance integration is intentionally deferred until the policy is finalized. Privy currently handles onboarding only.
+Privy handles onboarding. For the hackathon demo, the issuer grants each wallet an on-chain access tier through `IdentityRegistry`; external identity attestations are intentionally out of scope.
 
 ## Market controls
 
@@ -58,5 +59,5 @@ The Vue frontend uses Privy for wallet onboarding. Swap execution remains disabl
 
 - Add CREATE2 hook deployment and pool initialization scripts.
 - Connect frontend quoting and execution to the permissioned router.
-- Finalize the identity and compliance policy.
+- Replace the issuer-managed demo access list with the production identity policy.
 - Use a production-grade NAV feed.

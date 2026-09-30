@@ -9,13 +9,12 @@ import {AssetTokenFactory} from "../src/factories/AssetTokenFactory.sol";
 
 contract Deploy is Script {
     function run() external returns (MarketFactory factory) {
-        address easAddress = vm.envAddress("EAS_ADDRESS");
         vm.startBroadcast();
         address identityRegistryFactory = address(new IdentityRegistryFactory());
         address navOracleFactory = address(new NAVOracleFactory());
         address assetTokenFactory = address(new AssetTokenFactory());
 
-        factory = new MarketFactory(easAddress, identityRegistryFactory, navOracleFactory, assetTokenFactory);
+        factory = new MarketFactory(identityRegistryFactory, navOracleFactory, assetTokenFactory);
         vm.stopBroadcast();
 
         console.log("MarketFactory deployed at:", address(factory));

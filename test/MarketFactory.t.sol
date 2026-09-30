@@ -13,21 +13,16 @@ import {
 import {IdentityRegistryFactory} from "../src/factories/IdentityRegistryFactory.sol";
 import {NAVOracleFactory} from "../src/factories/NAVOracleFactory.sol";
 import {AssetTokenFactory} from "../src/factories/AssetTokenFactory.sol";
-import {MockEAS} from "./mocks/MockEAS.sol";
 
 contract MarketFactoryTest is Test {
     function test_DeployMarketWiresAllowlistAndHandsOwnershipToIssuer() public {
-        MockEAS eas = new MockEAS();
         MarketFactory factory = new MarketFactory(
-            address(eas),
-            address(new IdentityRegistryFactory()),
-            address(new NAVOracleFactory()),
-            address(new AssetTokenFactory())
+            address(new IdentityRegistryFactory()), address(new NAVOracleFactory()), address(new AssetTokenFactory())
         );
 
         address issuer = makeAddr("issuer");
         vm.prank(issuer);
-        (address token,,, address checker) = factory.deployMarket("Agora Note", "AGN", 1 days, 30 days);
+        (address token,,, address checker) = factory.deployMarket("Agora Note", "AGN", 1 days);
 
         assertEq(AgoraAllowlistChecker(checker).assetToken(), token);
         assertEq(
@@ -43,28 +38,16 @@ contract MarketFactoryTest is Test {
         assertEq(PermissionedAssetToken(token).owner(), issuer);
     }
 
-    function test_AttestedTierControlsSwapAndLiquidityPermissions() public {
-        MockEAS eas = new MockEAS();
+    function test_IssuerManagedTierControlsSwapAndLiquidityPermissions() public {
         address issuer = makeAddr("issuer");
         address investor = makeAddr("investor");
-        bytes32 schema = keccak256("investor-tier");
-        bytes32 uid = keccak256("attestation");
-
-        IdentityRegistry registry = new IdentityRegistry(address(eas), issuer, 30 days);
+        IdentityRegistry registry = new IdentityRegistry(issuer);
         AgoraAllowlistChecker checker = new AgoraAllowlistChecker(address(1), registry, issuer);
 
-        bytes32[] memory schemas = new bytes32[](1);
-        schemas[0] = schema;
         vm.startPrank(issuer);
-        registry.setRequiredSchemas(schemas);
-        registry.setTrustedAttester(schema, issuer, true);
+        registry.setEligibility(investor, 2);
         checker.setTierPermissions(2, PermissionFlags.SWAP_ALLOWED);
         vm.stopPrank();
-
-        eas.registerWithData(uid, schema, investor, issuer, 0, 0, abi.encode(uint8(2)));
-        bytes32[] memory uids = new bytes32[](1);
-        uids[0] = uid;
-        registry.refreshEligibility(investor, uids);
 
         assertEq(registry.tierOf(investor), 2);
         assertEq(
