@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { Investor, TokenizedAsset } from '@/types/market'
 import { eligibilityState, eligibilityReasonShort } from '@/composables/useEligibility'
-import { poolCondition } from '@/utils/quote'
+import { isTradablePool, poolCondition } from '@/utils/quote'
 import { POOL_CONDITION_CONFIG } from '@/utils/statusConfig'
 import { formatCurrency, formatPercent, formatRate } from '@/utils/format'
 import { premiumDiscountPct } from '@/utils/pricing'
@@ -18,28 +18,22 @@ const props = defineProps<{
 const state = computed(() => eligibilityState(props.asset, props.investor))
 const condition = computed(() => poolCondition(props.asset))
 const statusVisual = computed(() => POOL_CONDITION_CONFIG[condition.value])
-// One direction still trades under the rebalancing guard, so it is not a block.
-const poolOpen = computed(() => condition.value === 'open' || condition.value === 'rebalance_only')
-const tradable = computed(() => state.value === 'eligible' && poolOpen.value)
+const tradable = computed(() => state.value === 'eligible' && isTradablePool(props.asset))
 const premium = computed(() => premiumDiscountPct(props.asset))
 
-// Only surface a note when something actually limits trading — an eligible,
-// healthy pool needs no extra text competing with the price.
+// The pool's own condition already has a badge, so the note carries only what
+// the badge cannot say: why *this* investor cannot trade the asset. An eligible
+// investor looking at a healthy pool gets no extra text competing with the price.
 const blockingNote = computed(() => {
-  if (condition.value !== 'open') {
-    return { text: statusVisual.value.label, critical: condition.value === 'outside_band' }
-  }
-  if (state.value !== 'eligible') {
-    return { text: eligibilityReasonShort(props.asset, props.investor), critical: state.value === 'restricted' }
-  }
-  return null
+  if (state.value === 'eligible') return null
+  return { text: eligibilityReasonShort(props.asset, props.investor), critical: state.value === 'restricted' }
 })
 </script>
 
 <template>
   <RouterLink
     :to="`/trade/${asset.id}`"
-    class="flex flex-col gap-3 rounded-lg border border-hairline bg-surface p-4 transition hover:border-ink-muted"
+    class="flex flex-col gap-3 rounded-lg border border-hairline bg-surface p-4 transition hover:border-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
   >
     <div class="flex items-start justify-between gap-2">
       <div class="min-w-0">

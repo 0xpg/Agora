@@ -72,7 +72,7 @@ onBeforeUnmount(() => {
           {{ STATUS_LABEL[status] }}
         </span>
         <span class="hidden h-3.5 w-px bg-hairline sm:inline-block" aria-hidden="true" />
-        <span>Oracle: Chainlink NAV Stream Proof</span>
+        <span>NAV published by issuers</span>
       </div>
       <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 font-medium uppercase tracking-wide">
         <span class="tabular-nums">UTC {{ utcTime }} &middot; Block {{ blockLabel }}</span>

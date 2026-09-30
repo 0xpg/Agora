@@ -6,48 +6,54 @@ import { mockInvestor } from '@/data/mockInvestor'
 import { useWalletStore } from '@/stores/wallet'
 import { TARGET_CHAIN_NAME } from '@/config/chain'
 import { premiumDiscountPct } from '@/utils/pricing'
-import { poolCondition } from '@/utils/quote'
+import { isTradablePool } from '@/utils/quote'
 import { formatBps, formatCurrency, formatPercent } from '@/utils/format'
 import AssetCard from '@/components/AssetCard.vue'
 import AppFooter from '@/components/layout/AppFooter.vue'
 import LandingGlobe from '@/components/LandingGlobe.vue'
 import SummaryMetrics, { type MetricItem } from '@/components/SummaryMetrics.vue'
 
+// Written for someone who has never used an on-chain market: every term that
+// carries weight later on the site is introduced here in plain words first.
 const VALUE_PROPS = [
   {
-    title: 'Discover',
-    body: 'Browse tokenized real-world assets across real estate, credit, treasuries, and more — filtered by class, issuer, and eligibility.',
+    title: 'Browse real assets',
+    body: 'Office buildings, private credit, treasuries, infrastructure and more — each one issued as a token you can hold and trade. Filter by type, issuer or what you qualify for.',
   },
   {
-    title: 'Verified Access',
-    body: "Every asset lists the investor tier and KYC status it requires, so you know upfront whether you're eligible to trade it.",
+    title: 'Sign in with an email',
+    body: 'No wallet, no browser extension, nothing to install. Sign in with your email and a secure wallet is created for you. Already have one? Connect it instead.',
   },
   {
-    title: 'Transparent NAV',
-    body: "See how each asset's market price compares to its reference NAV, with full price history alongside it.",
+    title: 'See what it is worth',
+    body: 'Every asset shows the value its issuer publishes — its net asset value, or NAV — right next to the price it is trading at, so you can always see whether you are paying above or below it.',
   },
   {
-    title: 'NAV-Anchored Liquidity',
-    body: 'Swaps settle the moment you confirm them, with liquidity concentrated around NAV and fees that rise as price moves away from it.',
+    title: 'Trade whenever you want',
+    body: 'Nothing to wait for and no queue to join. Every market keeps liquidity standing by, so you review a price and the trade settles the moment you accept it.',
   },
 ] as const
 
 const HOW_IT_WORKS = [
   {
-    title: 'Discover a market',
-    body: 'Browse tokenized assets by class, issuer, or eligibility, and see each one’s live NAV and pricing context.',
+    title: 'Sign in',
+    body: 'Enter your email and we create a wallet for you behind the scenes, or connect a wallet you already use. Either way it takes a few seconds, and that wallet is what holds your assets.',
   },
   {
-    title: 'Confirm eligibility',
-    body: 'Every asset lists its required investor tier and KYC status, so you always know where you stand before trading.',
+    title: 'Find a market',
+    body: 'Browse by asset type, issuer or eligibility. Each market shows what the asset is worth, what it is trading at, and how much liquidity is available.',
   },
   {
-    title: 'Review the live quote',
-    body: 'Enter what you want to pay or what you want to receive. Every quote shows the fee, the price impact, and where the trade would leave the pool price.',
+    title: 'Check what it requires',
+    body: 'Assets like these are not open to everyone. Each one states the investor category and verification it needs, and tells you whether you already meet them.',
   },
   {
-    title: 'Swap and settle immediately',
-    body: 'Approve once, then confirm. There is no waiting period — and rather than fill you outside the issuer’s permitted range, the pool refuses the swap.',
+    title: 'Review the price',
+    body: 'Enter what you want to spend, or what you want to end up with. Before you commit, you see the fee, how much your own trade moves the price, and the worst outcome you would accept.',
+  },
+  {
+    title: 'Confirm, and it is done',
+    body: 'Approve once, then confirm. There is no settlement delay. The issuer sets limits on each market — a price range, a maximum trade size — and a trade that would break one is declined outright rather than filled on bad terms.',
   },
 ] as const
 
@@ -57,12 +63,15 @@ const wallet = useWalletStore()
 
 const HEADLINE_WORDS = ['Real-world', 'assets,', 'made', 'discoverable', 'and'] as const
 
-// A mix of open markets, not filtered to only what this particular investor is
-// eligible for — an anonymous visitor hasn't connected a wallet yet, and seeing
-// a restricted card here doubles as a preview of the "Verified Access" idea.
+// Markets that are actually trading, so the preview cannot lead with a paused
+// or halted pool. Not filtered by what this particular investor is eligible for
+// — an anonymous visitor hasn't signed in yet, and a restricted card here
+// doubles as a preview of the eligibility rules.
 const previewAssets = computed(() =>
   [...mockAssets]
-    .filter((asset) => poolCondition(asset) === 'open')
+    // Wrapped, not passed by reference: `filter` would hand the array index in
+    // as the helper's `now`.
+    .filter((asset) => isTradablePool(asset))
     .sort((a, b) => b.liquidity - a.liquidity)
     .slice(0, 3),
 )
@@ -72,9 +81,9 @@ const previewMetrics = computed<MetricItem[]>(() => {
   const avgPremiumPct =
     mockAssets.reduce((sum, asset) => sum + premiumDiscountPct(asset), 0) / mockAssets.length
   return [
-    { label: 'TOTAL LIQUIDITY', value: formatCurrency(totalLiquidity, 'USD', 0) },
+    { label: 'LIQUIDITY AVAILABLE', value: formatCurrency(totalLiquidity, 'USD', 0) },
     {
-      label: 'AVG. PREMIUM TO NAV',
+      label: 'AVG. PRICE VS NAV',
       value: formatBps(avgPremiumPct),
       valueClass: avgPremiumPct >= 0 ? 'text-success' : 'text-critical',
     },
@@ -150,17 +159,23 @@ function trackPointer(event: PointerEvent) {
 
     <header class="sticky top-0 z-50 border-b border-hairline bg-page/70 backdrop-blur-md">
       <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
-        <RouterLink to="/" class="group flex items-center gap-2">
+        <RouterLink to="/" class="group flex items-center gap-2 rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
           <span
             class="flex h-5 w-5 rotate-45 rounded-[3px] bg-primary shadow-[0_0_18px_var(--color-primary)] transition-transform duration-500 group-hover:rotate-[135deg]"
           />
           <span class="text-base font-semibold tracking-tight text-ink">Agora</span>
         </RouterLink>
         <div class="flex items-center gap-4">
-          <a href="#how-it-works" class="hidden text-sm font-medium text-ink-secondary transition hover:text-primary sm:inline">
+          <a
+            href="#how-it-works"
+            class="hidden rounded text-sm font-medium text-ink-secondary transition hover:text-primary sm:inline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
             How it works
           </a>
-          <RouterLink to="/docs" class="hidden text-sm font-medium text-ink-secondary transition hover:text-primary sm:inline">
+          <RouterLink
+            to="/docs"
+            class="hidden rounded text-sm font-medium text-ink-secondary transition hover:text-primary sm:inline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
             Docs
           </RouterLink>
           <RouterLink to="/markets" class="cta-primary text-sm">Enter Agora</RouterLink>
@@ -177,7 +192,7 @@ function trackPointer(event: PointerEvent) {
           <span class="pulse-ring absolute inline-flex h-full w-full rounded-full bg-primary" />
           <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
         </span>
-        Permissioned RWA AMM &middot; {{ TARGET_CHAIN_NAME }}
+        Continuous market for tokenized assets &middot; {{ TARGET_CHAIN_NAME }}
       </div>
 
       <h1 class="mt-6 text-4xl font-semibold tracking-tight text-ink sm:text-6xl">
@@ -195,23 +210,29 @@ function trackPointer(event: PointerEvent) {
       </h1>
 
       <p class="hero-rise mx-auto mt-6 max-w-2xl text-lg text-ink-secondary" style="--reveal-delay: 500ms">
-        Explore tokenized assets, compare pool price with NAV, and swap through transparent permissioned markets&mdash;all in one
-        place.
+        Real estate, private credit and treasuries, issued as tokens you can trade any time. See what each one is
+        worth, see what it costs, and trade it in one place.
       </p>
 
       <div class="hero-rise mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row" style="--reveal-delay: 600ms">
         <RouterLink to="/markets" class="cta-primary text-sm">Enter Agora</RouterLink>
         <a
           href="#how-it-works"
-          class="rounded-full border border-hairline px-6 py-3 text-sm font-semibold text-ink transition hover:border-primary/60 hover:text-primary"
+          class="rounded-full border border-hairline px-6 py-3 text-sm font-semibold text-ink transition hover:border-primary/60 hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
           How it works
         </a>
       </div>
     </section>
 
-    <!-- Live-feeling ticker of every listed market, premium to NAV alongside. -->
-    <div class="hero-rise relative border-y border-hairline bg-surface/40 py-3" style="--reveal-delay: 700ms">
+    <!-- Live-feeling ticker of every listed market, price against NAV alongside.
+         Decorative: the strip is rendered twice to loop seamlessly, and the
+         market preview below carries the same figures accessibly. -->
+    <div
+      class="hero-rise relative border-y border-hairline bg-surface/40 py-3"
+      style="--reveal-delay: 700ms"
+      aria-hidden="true"
+    >
       <div class="ticker-mask">
         <div class="ticker flex w-max items-center">
           <span
@@ -249,7 +270,7 @@ function trackPointer(event: PointerEvent) {
       <div v-reveal class="mb-8 text-center">
         <h2 class="text-2xl font-semibold text-ink sm:text-3xl">A glimpse of the markets</h2>
         <p class="mt-2 text-sm text-ink-secondary">
-          Real assets, live NAV-guarded liquidity &mdash; this is what you'll see inside.
+          Every market shows what the asset is worth, what it is trading at, and how far apart the two are.
         </p>
       </div>
       <SummaryMetrics v-reveal="80" :metrics="previewMetrics" class="mb-6" />
@@ -259,7 +280,7 @@ function trackPointer(event: PointerEvent) {
         </div>
       </div>
       <div v-reveal="420" class="mt-8 text-center">
-        <RouterLink to="/markets" class="arrow-link text-sm font-semibold text-primary">
+        <RouterLink to="/markets" class="arrow-link rounded text-sm font-semibold text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
           See all markets <span class="arrow inline-block">&rarr;</span>
         </RouterLink>
       </div>
@@ -346,6 +367,13 @@ function trackPointer(event: PointerEvent) {
     box-shadow 0.35s ease,
     transform 0.35s ease,
     background-color 0.35s ease;
+}
+
+/* Keyboard focus has to be as obvious as hover, and the pill's own
+   `overflow: hidden` does not clip an outline, which draws outside the box. */
+.cta-primary:focus-visible {
+  outline: 2px solid var(--color-primary-ink);
+  outline-offset: 3px;
 }
 
 .cta-primary:hover {

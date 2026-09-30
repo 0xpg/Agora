@@ -323,6 +323,16 @@ export function poolCondition(asset: TokenizedAsset, now = nowSeconds()): PoolCo
   return 'open'
 }
 
+/**
+ * True when the pool will take at least one direction. Under the rebalancing
+ * guard only one side trades, which still counts — unlike a paused, halted or
+ * mid-NAV-update pool, which takes nothing.
+ */
+export function isTradablePool(asset: TokenizedAsset, now = nowSeconds()): boolean {
+  const condition = poolCondition(asset, now)
+  return condition === 'open' || condition === 'rebalance_only'
+}
+
 /** Which side the rebalancing guard still accepts, or null when both trade. */
 export function permittedSide(asset: TokenizedAsset): SwapSide | null {
   const guard = guardZone(asset.policy)
