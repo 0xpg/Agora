@@ -53,7 +53,23 @@ git submodule update --init --recursive
 
 CI runs `forge fmt --check`, `forge build --sizes`, and `forge test -vvv`.
 
-The Vue frontend uses Privy for wallet onboarding. The Base Sepolia demo market deployment is recorded in `config/addresses.json` and `config/markets.json`; frontend execution still uses the simulator until its executor is connected to the deployed swap router.
+The Vue frontend uses Privy for wallet onboarding. Agora Demo Note executes against the deployed Base Sepolia swap router; the other showcase markets use representative data.
+
+## Base Sepolia deployment
+
+| Contract | Address |
+|---|---|
+| Agora Demo Note (`ADN`) | [`0x4a72a139e65a25723478e5819F03C2789F40C206`](https://sepolia.basescan.org/address/0x4a72a139e65a25723478e5819F03C2789F40C206) |
+| Demo USD (`dUSD`) | [`0xEb9EaC3f9Ec57632CDFDE23D55716c2EA2Fa3a99`](https://sepolia.basescan.org/address/0xEb9EaC3f9Ec57632CDFDE23D55716c2EA2Fa3a99) |
+| Identity registry | [`0xcaDF49580A6FF18A10E5fC089E4a1C78DA0151D6`](https://sepolia.basescan.org/address/0xcaDF49580A6FF18A10E5fC089E4a1C78DA0151D6) |
+| NAV oracle | [`0xfB8A8746C4f44173b0812cfA1815b8Eb17108B08`](https://sepolia.basescan.org/address/0xfB8A8746C4f44173b0812cfA1815b8Eb17108B08) |
+| Allowlist checker | [`0xd2C12D1bd7a925698EAeb66cF781cda1a1E524c9`](https://sepolia.basescan.org/address/0xd2C12D1bd7a925698EAeb66cF781cda1a1E524c9) |
+| Pool manager | [`0xb528D4cBB72A86bA7CDbc42100ca24a8283be8E3`](https://sepolia.basescan.org/address/0xb528D4cBB72A86bA7CDbc42100ca24a8283be8E3) |
+| Policy hook | [`0xB410db440051eC321Cae11edC322DB6f5AD2a0C0`](https://sepolia.basescan.org/address/0xB410db440051eC321Cae11edC322DB6f5AD2a0C0) |
+| Liquidity router | [`0x6B1c7e67A015A7F68d5116239120579FA5bb3236`](https://sepolia.basescan.org/address/0x6B1c7e67A015A7F68d5116239120579FA5bb3236) |
+| Swap router | [`0x150f6e746aD2d86D7c6869B29992bfec857bF54D`](https://sepolia.basescan.org/address/0x150f6e746aD2d86D7c6869B29992bfec857bF54D) |
+
+Canonical machine-readable deployment data lives in [`config/markets.json`](config/markets.json).
 
 ## Before production
 
