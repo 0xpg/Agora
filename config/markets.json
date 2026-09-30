@@ -1,3 +1,22 @@
 {
-  "84532": []
+  "84532": [
+    {
+      "id": "agora-demo-note",
+      "name": "Agora Demo Note",
+      "symbol": "ADN",
+      "assetToken": "0x4a72a139e65a25723478e5819F03C2789F40C206",
+      "settlementToken": "0xEb9EaC3f9Ec57632CDFDE23D55716c2EA2Fa3a99",
+      "identityRegistry": "0xB23E89dCe1d29552e8018BDE7F52eB39338DaA4b",
+      "navOracle": "0xfB8A8746C4f44173b0812cfA1815b8Eb17108B08",
+      "allowlistChecker": "0xd2C12D1bd7a925698EAeb66cF781cda1a1E524c9",
+      "poolManager": "0xb528D4cBB72A86bA7CDbc42100ca24a8283be8E3",
+      "hook": "0xB410db440051eC321Cae11edC322DB6f5AD2a0C0",
+      "liquidityRouter": "0x6B1c7e67A015A7F68d5116239120579FA5bb3236",
+      "swapRouter": "0x150f6e746aD2d86D7c6869B29992bfec857bF54D",
+      "currency0": "0x4a72a139e65a25723478e5819F03C2789F40C206",
+      "currency1": "0xEb9EaC3f9Ec57632CDFDE23D55716c2EA2Fa3a99",
+      "fee": 8388608,
+      "tickSpacing": 60
+    }
+  ]
 }

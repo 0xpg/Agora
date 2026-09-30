@@ -14,7 +14,7 @@ Agora is a concentrated-liquidity AMM with issuer-defined market controls. Its p
 ## Architecture
 
 ```text
-Privy wallet -> permissioned execution router -> asset adapter -> singleton pool manager -> policy hook
+Privy wallet -> swap router -> singleton pool manager -> policy hook
 ```
 
 | Component | Responsibility |
@@ -53,11 +53,11 @@ git submodule update --init --recursive
 
 CI runs `forge fmt --check`, `forge build --sizes`, and `forge test -vvv`.
 
-The Vue frontend uses Privy for wallet onboarding. Swap execution remains disabled until deployed pool, router, adapter, and hook addresses are added to `config/addresses.json`.
+The Vue frontend uses Privy for wallet onboarding. The Base Sepolia demo market deployment is recorded in `config/addresses.json` and `config/markets.json`; frontend execution still uses the simulator until its executor is connected to the deployed swap router.
 
 ## Before production
 
-- Add CREATE2 hook deployment and pool initialization scripts.
+- Replace the demo liquidity and swap routers with production routers.
 - Connect frontend quoting and execution to the permissioned router.
 - Replace the issuer-managed demo access list with the production identity policy.
 - Use a production-grade NAV feed.
