@@ -1,13 +1,13 @@
 {
   "84532": {
     "chainName": "baseSepolia",
-    "eas": null,
+    "eas": "0x4200000000000000000000000000000000000021",
     "settlementToken": null,
-    "identityRegistryFactory": null,
-    "navOracleFactory": null,
-    "assetTokenFactory": null,
+    "identityRegistryFactory": "0xae198Ae91E4D0caedBaD7b705B4579EE7EEd6339",
+    "navOracleFactory": "0x2E681B646e47c8B44DEF737738C134A363D544bE",
+    "assetTokenFactory": "0x4a6DD177DFE7B5CB36AB5730EA09A7AdED183c8E",
     "poolManager": null,
-    "marketFactory": null,
+    "marketFactory": "0x76EC311aAE944138af1275F5fA05124C16815848",
     "markets": []
   }
 }
