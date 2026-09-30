@@ -6,6 +6,7 @@ import { mockAssets } from '@/data/mockAssets'
 import { useWalletStore } from '@/stores/wallet'
 import { TARGET_CHAIN_NAME } from '@/config/chain'
 import { formatCompactCurrency, truncateAddress } from '@/utils/format'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 defineProps<{
   investor: Investor
@@ -31,10 +32,25 @@ function closeMobileNav() {
   mobileNavOpen.value = false
 }
 
-// Disconnecting signs the investor out; the access guard then returns them
-// from any gated page to the homepage.
-async function disconnect() {
-  await wallet.disconnect()
+// Signing out is easy to trigger by accident — the wallet chip is a button the
+// investor reaches for to *read* their address — and the access guard boots them
+// off whatever gated page they were on. So it asks first.
+const confirmingDisconnect = ref(false)
+const disconnecting = ref(false)
+
+function askToDisconnect() {
+  confirmingDisconnect.value = true
+}
+
+async function confirmDisconnect() {
+  disconnecting.value = true
+  try {
+    // Only dismiss on success: a failed sign-out keeps the dialog up, with the
+    // reason inside it, rather than closing as if it had worked.
+    if (await wallet.disconnect()) confirmingDisconnect.value = false
+  } finally {
+    disconnecting.value = false
+  }
 }
 </script>
 
@@ -126,7 +142,9 @@ async function disconnect() {
           <button
             type="button"
             class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition hover:border-primary/50"
-            @click="disconnect()"
+            :aria-haspopup="'dialog'"
+            title="Wallet options"
+            @click="askToDisconnect"
           >
             <span
               class="flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-[9px] font-semibold text-primary-ink"
@@ -142,6 +160,27 @@ async function disconnect() {
     <p v-if="wallet.error" role="alert" class="border-t border-critical/30 bg-critical/15 px-6 py-2 text-xs text-critical">
       {{ wallet.error }}
     </p>
+
+    <ConfirmDialog
+      v-if="wallet.connected"
+      :open="confirmingDisconnect"
+      title="Disconnect this wallet?"
+      message="You'll be signed out and sent back to the homepage. Markets, trading and your portfolio need a connected wallet."
+      :detail="wallet.address ?? ''"
+      confirm-label="Disconnect"
+      cancel-label="Stay signed in"
+      busy-label="Disconnecting…"
+      :busy="disconnecting"
+      @cancel="confirmingDisconnect = false"
+      @confirm="confirmDisconnect"
+    >
+      <p class="mt-3 text-xs leading-relaxed text-ink-muted">
+        Nothing leaves your wallet and no position changes — you can reconnect whenever you like.
+      </p>
+      <p v-if="wallet.error && confirmingDisconnect" role="alert" class="mt-3 text-xs text-critical">
+        {{ wallet.error }}
+      </p>
+    </ConfirmDialog>
 
     <nav v-if="mobileNavOpen" :id="mobileNavId" class="border-t border-hairline px-6 py-3 md:hidden">
       <RouterLink

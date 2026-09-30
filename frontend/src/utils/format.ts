@@ -1,9 +1,20 @@
+/**
+ * `Intl` currency formatting only accepts ISO 4217 codes, and a tokenised
+ * settlement currency is usually not one — "dUSD" makes it throw outright.
+ * Anything that is not a three-letter code renders as an amount with its symbol
+ * alongside instead.
+ */
+const ISO_4217 = /^[A-Za-z]{3}$/
+
 export function formatCurrency(value: number, currency = 'USD', maximumFractionDigits = 2): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    maximumFractionDigits,
-  }).format(value)
+  if (ISO_4217.test(currency)) {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits,
+    }).format(value)
+  }
+  return `${new Intl.NumberFormat('en-US', { maximumFractionDigits }).format(value)} ${currency}`
 }
 
 export function formatCompactNumber(value: number): string {
@@ -28,12 +39,15 @@ export function formatRate(value: number | null, maximumFractionDigits = 2): str
 }
 
 export function formatCompactCurrency(value: number, currency = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    notation: 'compact',
-    maximumFractionDigits: 2,
-  }).format(value)
+  if (ISO_4217.test(currency)) {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      notation: 'compact',
+      maximumFractionDigits: 2,
+    }).format(value)
+  }
+  return `${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(value)} ${currency}`
 }
 
 export function truncateAddress(address: string, lead = 5, trail = 4): string {

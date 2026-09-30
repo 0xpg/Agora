@@ -1,5 +1,5 @@
 import type { PoolPolicy, TokenizedAsset } from '@/types/market'
-import { formatDuration } from '@/utils/format'
+import { formatCurrency, formatDuration } from '@/utils/format'
 
 /**
  * Quoting for one NAV-anchored concentrated-liquidity pool.
@@ -114,6 +114,17 @@ export function guardZone(policy: PoolPolicy): GuardZone {
 }
 
 /**
+ * The prices a swap can actually be filled at: where liquidity exists, bounded
+ * by where price is permitted. Depth stops at whichever end comes first.
+ */
+export function tradableRange(policy: PoolPolicy, active: ActivePolicy): { lower: number; upper: number } {
+  return {
+    lower: Math.max(policy.liquidityLower, active.bandLower),
+    upper: Math.min(policy.liquidityUpper, active.bandUpper),
+  }
+}
+
+/**
  * Virtual liquidity for the range position, back-solved from the pool's reported
  * value. A concentrated position of liquidity `L` over [`lower`, `upper`] holds
  * `L * (1/√p - 1/√upper)` asset tokens and `L * (√p - √lower)` of quote; setting
@@ -139,10 +150,10 @@ export interface RangeDepth {
   quoteOut: number
 }
 
-export function rangeDepth(liquidity: number, price: number, active: ActivePolicy): RangeDepth {
+export function rangeDepth(liquidity: number, price: number, range: { lower: number; upper: number }): RangeDepth {
   const sqrtPrice = Math.sqrt(price)
-  const lower = Math.sqrt(active.bandLower)
-  const upper = Math.sqrt(active.bandUpper)
+  const lower = Math.sqrt(range.lower)
+  const upper = Math.sqrt(range.upper)
   return {
     assetOut: Math.max(liquidity * (1 / sqrtPrice - 1 / upper), 0),
     quoteIn: Math.max(liquidity * (upper - sqrtPrice), 0),
@@ -201,7 +212,8 @@ export function quoteSwap(input: QuoteInput): Quote | null {
 
   const active = activePolicy(asset.policy, input.now ?? nowSeconds())
   const spotPrice = asset.lastPrice
-  const liquidity = poolLiquidity(asset.liquidity, spotPrice, active.bandLower, active.bandUpper)
+  const range = tradableRange(asset.policy, active)
+  const liquidity = poolLiquidity(asset.liquidity, spotPrice, range.lower, range.upper)
   if (liquidity <= 0) return null
 
   const feeBps = feeBpsAt(spotPrice, active, asset.policy.targetPrice)
@@ -209,8 +221,8 @@ export function quoteSwap(input: QuoteInput): Quote | null {
   if (feeRate >= 1) return null
 
   const sqrtPrice = Math.sqrt(spotPrice)
-  const sqrtLower = Math.sqrt(active.bandLower)
-  const sqrtUpper = Math.sqrt(active.bandUpper)
+  const sqrtLower = Math.sqrt(range.lower)
+  const sqrtUpper = Math.sqrt(range.upper)
 
   let assetAmount: number
   let quoteAmount: number
@@ -377,10 +389,11 @@ export function maxPayAmount(
   now = nowSeconds(),
 ): number | null {
   const active = activePolicy(asset.policy, now)
-  const liquidity = poolLiquidity(asset.liquidity, asset.lastPrice, active.bandLower, active.bandUpper)
+  const range = tradableRange(asset.policy, active)
+  const liquidity = poolLiquidity(asset.liquidity, asset.lastPrice, range.lower, range.upper)
   if (liquidity <= 0) return null
 
-  const depth = rangeDepth(liquidity, asset.lastPrice, active)
+  const depth = rangeDepth(liquidity, asset.lastPrice, range)
   const feeRate = feeBpsAt(asset.lastPrice, active, asset.policy.targetPrice) / BPS
   if (feeRate >= 1) return null
   const ceiling = notionalCeiling(asset.policy, now)
@@ -455,8 +468,9 @@ export function assessSwap(input: QuoteInput): SwapAssessment {
   const now = input.now ?? nowSeconds()
   const active = activePolicy(policy, now)
   const guard = guardZone(policy)
-  const liquidity = poolLiquidity(asset.liquidity, asset.lastPrice, active.bandLower, active.bandUpper)
-  const depth = rangeDepth(liquidity, asset.lastPrice, active)
+  const range = tradableRange(policy, active)
+  const liquidity = poolLiquidity(asset.liquidity, asset.lastPrice, range.lower, range.upper)
+  const depth = rangeDepth(liquidity, asset.lastPrice, range)
   const feeBps = feeBpsAt(asset.lastPrice, active, policy.targetPrice)
   const navAgeSeconds = Math.max(now - policy.navUpdatedAt, 0)
   const quote = quoteSwap({ ...input, now })
@@ -511,7 +525,7 @@ export function assessSwap(input: QuoteInput): SwapAssessment {
       blockers.push({
         code: 'trade_exceeds_max',
         title: 'Trade is above the per-swap limit',
-        detail: `This pool caps a single swap at ${policy.maxTradeNotional.toLocaleString('en-US', { style: 'currency', currency: asset.currency, maximumFractionDigits: 0 })}. Split it into smaller swaps to trade the full size.`,
+        detail: `This pool caps a single swap at ${formatCurrency(policy.maxTradeNotional, asset.currency, 0)}. Split it into smaller swaps to trade the full size.`,
         poolWide: false,
       })
     }

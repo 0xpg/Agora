@@ -77,6 +77,11 @@ function buildHistory(
 interface PolicySpec {
   /** Half-width of the permitted price range, in bps either side of NAV. */
   bandWidthBps: number
+  /**
+   * Half-width of the range liquidity is actually provided over. Defaults to the
+   * permitted band; a real pool concentrates inside it.
+   */
+  liquidityWidthBps?: number
   baseFeeBps: number
   edgeFeeBps: number
   directionalGuardBps: number
@@ -109,9 +114,13 @@ function resolvePolicy(spec: PolicySpec, nav: number, now: number): PoolPolicy {
     }
   }
 
+  const liquidityWidth = (spec.liquidityWidthBps ?? spec.bandWidthBps) / 10_000
+
   return {
     bandLower: nav * (1 - width),
     bandUpper: nav * (1 + width),
+    liquidityLower: nav * (1 - liquidityWidth),
+    liquidityUpper: nav * (1 + liquidityWidth),
     targetPrice: nav,
     baseFeeBps: spec.baseFeeBps,
     edgeFeeBps: spec.edgeFeeBps,
@@ -206,7 +215,14 @@ export const mockAssets: TokenizedAsset[] = [
     volatility: 0,
     premiumBps: 0,
     policy: {
-      bandWidthBps: 1_000,
+      // The hook's bounds are set on the square root of price — 0.95 and 1.05 of
+      // it — which is [0.9025, 1.1025] in price and so not symmetric. This takes
+      // the inner width, matching the lower bound exactly and staying inside the
+      // upper, so the UI never prices a swap outside what the pool permits.
+      bandWidthBps: 975,
+      // Liquidity sits in ticks -600..600, which is [0.9418, 1.0618] in price —
+      // well inside the permitted band. Depth stops here, not at the band.
+      liquidityWidthBps: 582,
       baseFeeBps: 5,
       edgeFeeBps: 50,
       directionalGuardBps: 250,

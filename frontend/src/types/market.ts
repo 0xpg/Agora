@@ -64,6 +64,13 @@ export interface PoolPolicy {
   /** Ends of the permitted price range. A swap reverts if it starts or lands outside. */
   bandLower: number
   bandUpper: number
+  /**
+   * Where liquidity is actually provided, which is usually narrower than the
+   * permitted band. Depth comes from this: past its ends there is nothing left
+   * to trade against, however much of the band remains.
+   */
+  liquidityLower: number
+  liquidityUpper: number
   /** The NAV-anchored price the fee curve and the rebalancing guard centre on. */
   targetPrice: number
   /** Fee charged at the target price, rising linearly to `edgeFeeBps` at the range edge. */

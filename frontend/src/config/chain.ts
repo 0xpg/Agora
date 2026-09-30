@@ -46,3 +46,18 @@ function resolveTargetChain(): Chain {
 export const TARGET_CHAIN = resolveTargetChain()
 export const TARGET_CHAIN_ID = TARGET_CHAIN.id
 export const TARGET_CHAIN_NAME = TARGET_CHAIN.name
+
+// The chain's own explorer, as its viem definition names it. Everything that
+// links out to a transaction or an address goes through here, so a chain
+// without an explorer degrades to "no link" rather than a broken one.
+const EXPLORER = TARGET_CHAIN.blockExplorers?.default ?? null
+
+export const TARGET_CHAIN_EXPLORER_NAME = EXPLORER?.name ?? null
+
+export function explorerTxUrl(hash: string): string | null {
+  return EXPLORER ? `${EXPLORER.url.replace(/\/$/, '')}/tx/${hash}` : null
+}
+
+export function explorerAddressUrl(address: string): string | null {
+  return EXPLORER ? `${EXPLORER.url.replace(/\/$/, '')}/address/${address}` : null
+}

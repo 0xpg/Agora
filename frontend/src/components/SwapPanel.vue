@@ -1,26 +1,30 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import type { Investor, TokenizedAsset } from '@/types/market'
 import { useWalletStore } from '@/stores/wallet'
+import { usePortfolioStore } from '@/stores/portfolio'
+import { useTradeHistoryStore, type TradeStatus } from '@/stores/tradeHistory'
 import { TARGET_CHAIN_NAME } from '@/config/chain'
 import { eligibilityReason, eligibilityState } from '@/composables/useEligibility'
 import { useNow } from '@/composables/useNow'
-import {
-  createSimulatedExecutor,
-  useSwapTransaction,
-  type SwapRequest,
-} from '@/composables/useSwapTransaction'
-import { createDemoMarketExecutor } from '@/composables/useDemoMarketExecutor'
-import { assessSwap, maxPayAmount, type QuoteMode, type SwapSide } from '@/utils/quote'
+import { createUnavailableExecutor, useSwapTransaction, type SwapRequest } from '@/composables/useSwapTransaction'
+import { createMarketExecutor } from '@/execution/swapExecutor'
+import { marketFor } from '@/execution/market'
+import { assessSwap, maxPayAmount, type Quote, type QuoteMode, type SwapSide } from '@/utils/quote'
 import { formatAge, formatCurrency } from '@/utils/format'
 import TokenAmountInput from '@/components/TokenAmountInput.vue'
 import QuoteBreakdown from '@/components/QuoteBreakdown.vue'
 import PolicyNotice from '@/components/PolicyNotice.vue'
+import TradeReceipt from '@/components/TradeReceipt.vue'
 
 const props = defineProps<{ asset: TokenizedAsset; investor: Investor }>()
 const emit = defineEmits<{ 'update:postSwapPrice': [value: number | undefined] }>()
 
 const wallet = useWalletStore()
+const portfolio = usePortfolioStore()
+const history = useTradeHistoryStore()
+const router = useRouter()
 const now = useNow()
 
 const SLIPPAGE_PRESETS = [10, 50, 100] as const
@@ -72,30 +76,62 @@ function setReceive(value: number | null) {
   amount.value = value
 }
 
-const executorOptions = {
-  // The pool can refuse between quote and signature. This is the same check the
-  // panel renders, re-run at the moment of submission.
-  preflight: () => {
-    const refusal = assessment.value.blockers[0]
-    if (!refusal) return null
-    return { title: refusal.title, detail: refusal.detail, retryable: false }
-  },
-}
-const executor = props.asset.id === 'agora-demo-note'
-  ? createDemoMarketExecutor(wallet, executorOptions)
-  : createSimulatedExecutor(executorOptions)
+// ---------------------------------------------------------------------------
+// Execution
+
+/** The deployed market behind this asset, when one exists on the target chain. */
+const market = computed(() => marketFor(props.asset.id))
+const tradable = computed(() => market.value !== null)
+
+const executor = computed(() => {
+  const deployed = market.value
+  if (!deployed) return createUnavailableExecutor()
+  return createMarketExecutor(deployed, wallet, {
+    // The panel's own assessment, re-run at the moment of submission. The
+    // executor then simulates against live pool state on top of this.
+    preflight: () => {
+      const refusal = assessment.value.blockers[0]
+      if (!refusal) return null
+      return { kind: 'reverted', title: refusal.title, detail: refusal.detail, retryable: true }
+    },
+  })
+})
 
 const {
   stage: txStage,
-  txHash,
+  swapHash,
   failure: txFailure,
+  outcome,
+  nextStep,
+  activeStep,
   busy: txBusy,
-  simulated,
-  needsApproval: allowanceMissing,
-  approve,
+  refreshSteps,
+  runNextStep,
   submit,
   reset: resetTx,
-} = useSwapTransaction(executor)
+  dismissFailure,
+} = useSwapTransaction(() => executor.value)
+
+/** The quote as it stood when the trade was submitted — what the receipt describes. */
+const acceptedQuote = ref<Quote | null>(null)
+
+const request = computed<SwapRequest | null>(() => {
+  const current = quote.value
+  if (!current) return null
+  return {
+    assetId: props.asset.id,
+    side: side.value,
+    mode: mode.value,
+    amountIn: current.amountIn,
+    amountOut: current.amountOut,
+    bound: current.slippageBound,
+    slippageBps: slippageBps.value,
+    spotPrice: current.spotPrice,
+    postSwapPrice: current.postSwapPrice,
+    bandLower: assessment.value.active.bandLower,
+    bandUpper: assessment.value.active.bandUpper,
+  }
+})
 
 function selectSide(choice: SwapSide) {
   if (side.value === choice) return
@@ -125,54 +161,141 @@ const secondaryReceive = computed(() => {
 
 const navAge = computed(() => formatAge(assessment.value.navAgeSeconds))
 
+const canSubmit = computed(
+  () => wallet.canTransact && tradable.value && assessment.value.tradable && request.value !== null,
+)
 
-const request = computed<SwapRequest | null>(() => {
-  const current = quote.value
-  if (!current) return null
-  return {
-    assetId: props.asset.id,
-    side: side.value,
-    mode: mode.value,
-    amountIn: current.amountIn,
-    amountOut: current.amountOut,
-    bound: current.slippageBound,
-    slippageBps: slippageBps.value,
-    sqrtPriceLimitX96: BigInt(Math.floor(Math.sqrt(
-      current.postSwapPrice * (side.value === 'buy' ? 1 + slippageBps.value / 10_000 : 1 - slippageBps.value / 10_000),
-    ) * 2 ** 96)),
-  }
-})
-
-const needsApproval = computed(() => (request.value ? allowanceMissing(request.value) : true))
-const canSubmit = computed(() => wallet.canTransact && assessment.value.tradable && request.value !== null)
-
+/** What the primary button says, which is also what is happening right now. */
 const actionLabel = computed(() => {
   switch (txStage.value) {
-    case 'approve_signing':
-      return 'Confirm in your wallet…'
-    case 'approve_confirming':
-      return `Approving ${payToken.value}…`
-    case 'swap_signing':
-      return 'Confirm in your wallet…'
-    case 'swap_confirming':
-      return 'Submitting swap…'
+    case 'checking':
+      return 'Checking the pool…'
+    case 'prepare_signature':
+      return `${activeStep.value?.label ?? 'Confirm'} — sign in your wallet…`
+    case 'prepare_submitted':
+      return `${activeStep.value?.label ?? 'Preparing'}…`
+    case 'swap_signature':
+      return 'Confirm the swap in your wallet…'
+    case 'swap_submitted':
+      return 'Waiting for confirmation…'
     default:
-      return needsApproval.value
-        ? `Approve ${payToken.value}`
-        : side.value === 'buy'
-          ? `Buy ${props.asset.symbol}`
-          : `Sell ${props.asset.symbol}`
+      if (nextStep.value) return nextStep.value.label
+      return side.value === 'buy' ? `Buy ${props.asset.symbol}` : `Sell ${props.asset.symbol}`
   }
 })
 
+/** The plain-language "what is happening" line under each in-flight stage. */
+const stageDetail = computed(() => {
+  switch (txStage.value) {
+    case 'checking':
+      return 'Reading live pool state to make sure this trade will be accepted.'
+    case 'prepare_signature':
+      return activeStep.value?.detail ?? 'Sign the transaction in your wallet.'
+    case 'prepare_submitted':
+      return 'On its way. Waiting for the network to confirm it.'
+    case 'swap_signature':
+      return 'Sign the swap in your wallet. Nothing is spent until you do.'
+    case 'swap_submitted':
+      return 'Submitted. Waiting for the network to include it in a block.'
+    default:
+      return ''
+  }
+})
+
+/** The steps still outstanding, shown before anything is signed. */
+const stepHint = computed(() => {
+  const step = nextStep.value
+  if (!step || txBusy.value || txFailure.value) return ''
+  return step.detail
+})
+
+const failureTone = computed(() => (txFailure.value?.kind === 'rejected' ? 'warning' : 'critical'))
+
+function recordAttempt(status: TradeStatus, hash: string | null, reason?: string, timestamp?: number) {
+  const accepted = acceptedQuote.value
+  if (!accepted) return
+  history.record({
+    assetId: props.asset.id,
+    symbol: props.asset.symbol,
+    settlementSymbol: props.asset.currency,
+    side: accepted.side,
+    mode: accepted.mode,
+    amountIn: outcome.value?.amountIn ?? accepted.amountIn,
+    amountOut: outcome.value?.amountOut ?? accepted.amountOut,
+    executionPrice: accepted.executionPrice,
+    feeBps: accepted.feeBps,
+    feeAmount: accepted.feeAmount,
+    priceImpactPct: accepted.priceImpactPct,
+    hash,
+    status,
+    reason,
+    timestamp: timestamp ?? Math.floor(Date.now() / 1000),
+  })
+}
+
 async function onAction() {
-  if (!request.value) return
-  if (needsApproval.value) {
-    await approve(request.value)
+  const current = request.value
+  if (!current || txBusy.value) return
+
+  if (nextStep.value) {
+    await runNextStep(current)
     return
   }
-  await submit(request.value)
+
+  acceptedQuote.value = quote.value
+  await submit(current)
 }
+
+/** Clears the failure and leaves the entered amounts exactly as they were. */
+function retry() {
+  dismissFailure()
+}
+
+/**
+ * Takes the size the pool said it could fill. Applied to whichever field the
+ * investor pinned, so the trade keeps its shape.
+ */
+function useSuggestedAmount(value: number) {
+  // A hair under what the chain quoted, so rounding cannot put it back over.
+  amount.value = Number((value * 0.999).toFixed(6))
+  dismissFailure()
+}
+
+function tradeAgain() {
+  resetTx()
+  amount.value = null
+  mode.value = 'exactIn'
+  acceptedQuote.value = null
+}
+
+function goToPortfolio() {
+  void router.push({ name: 'portfolio' })
+}
+
+// Once a trade settles, holdings and balances are stale — re-read them rather
+// than making anyone reload the page.
+watch(txStage, (stage) => {
+  if (stage === 'confirmed') {
+    recordAttempt('confirmed', swapHash.value, undefined, outcome.value?.timestamp)
+    void portfolio.refresh()
+    return
+  }
+  if (stage === 'rejected' || stage === 'reverted' || stage === 'failed') {
+    recordAttempt(stage, swapHash.value, txFailure.value?.detail)
+    // A revert still consumed gas and may have moved allowances.
+    if (stage === 'reverted') void portfolio.refresh()
+  }
+})
+
+// What is still outstanding depends on the amount and the wallet, so it is
+// re-read as the trade changes rather than cached from the first look.
+watch(
+  [request, () => wallet.address, () => wallet.onTargetChain],
+  () => {
+    void refreshSteps(request.value)
+  },
+  { immediate: true },
+)
 
 // The trade page draws the quoted price onto its range meter.
 watch(
@@ -187,14 +310,18 @@ watch(
     side.value = 'buy'
     mode.value = 'exactIn'
     amount.value = null
+    acceptedQuote.value = null
     resetTx()
   },
 )
 
-// A change to the trade invalidates a finished one; the receipt should not
-// linger over a quote it no longer describes.
-watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
-  if (txStage.value === 'confirmed' || txStage.value === 'failed') resetTx()
+// Editing the trade invalidates a finished one — the receipt must not linger
+// over a quote it no longer describes. Editing after a failure is the investor
+// correcting it, so the explanation steps aside and the entered amounts stay
+// exactly where they are.
+watch([amount, mode, slippageBps], () => {
+  if (txStage.value === 'confirmed') resetTx()
+  else if (txFailure.value) dismissFailure()
 })
 </script>
 
@@ -204,7 +331,7 @@ watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
       <h2 class="text-sm font-semibold text-ink">Swap</h2>
       <button
         type="button"
-        class="rounded px-1.5 py-0.5 text-[11px] font-medium text-ink-muted hover:text-ink"
+        class="rounded px-1.5 py-0.5 text-[11px] font-medium text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         :aria-expanded="showSettings"
         @click="showSettings = !showSettings"
       >
@@ -215,15 +342,15 @@ watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
     <div v-if="showSettings" class="mb-4 rounded-md border border-hairline bg-page p-3">
       <p class="text-[11px] font-medium tracking-wide text-ink-muted">Slippage tolerance</p>
       <p class="mt-1 text-xs text-ink-secondary">
-        The pool re-prices between your quote and your transaction. Below this bound the swap reverts instead of
-        settling worse than quoted.
+        The pool re-prices between your quote and your transaction. Past this bound the swap stops rather than settling
+        worse than you accepted.
       </p>
       <div class="mt-2 flex gap-1.5">
         <button
           v-for="preset in SLIPPAGE_PRESETS"
           :key="preset"
           type="button"
-          class="rounded-md border px-2.5 py-1 text-xs font-medium tabular-nums transition"
+          class="rounded-md border px-2.5 py-1 text-xs font-medium tabular-nums transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           :class="
             slippageBps === preset
               ? 'border-primary/60 bg-primary/10 text-primary'
@@ -276,6 +403,13 @@ watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
       :detail="eligibilityDetail"
     />
 
+    <PolicyNotice
+      v-else-if="!tradable"
+      tone="info"
+      title="Not tradable on this network yet"
+      :detail="`${asset.name} is listed for reference. No market has been deployed for it on ${TARGET_CHAIN_NAME}, so there is nothing to swap against.`"
+    />
+
     <div v-else class="space-y-3">
       <PolicyNotice
         v-if="poolBlocker"
@@ -289,7 +423,7 @@ watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
           v-for="choice in (['buy', 'sell'] as const)"
           :key="choice"
           type="button"
-          class="flex-1 rounded px-3 py-1.5 font-medium capitalize transition"
+          class="flex-1 rounded px-3 py-1.5 font-medium capitalize transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           :class="
             side === choice
               ? choice === 'buy'
@@ -297,6 +431,7 @@ watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
                 : 'bg-critical text-on-accent'
               : 'text-ink-secondary hover:text-ink'
           "
+          :disabled="txBusy"
           @click="selectSide(choice)"
         >
           {{ choice }}
@@ -309,6 +444,7 @@ watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
         :model-value="payAmount"
         :secondary="secondaryPay"
         :max="maxPay"
+        :disabled="txBusy"
         :invalid="tradeBlocker !== null"
         @update:model-value="setPay"
       />
@@ -316,8 +452,9 @@ watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
       <div class="flex items-center justify-center">
         <button
           type="button"
-          class="rounded-full border border-hairline bg-page p-1.5 text-ink-muted transition hover:text-ink"
+          class="rounded-full border border-hairline bg-page p-1.5 text-ink-muted transition hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           :aria-label="side === 'buy' ? `Switch to selling ${asset.symbol}` : `Switch to buying ${asset.symbol}`"
+          :disabled="txBusy"
           @click="flipSide"
         >
           <svg viewBox="0 0 16 16" class="size-3.5" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -331,6 +468,7 @@ watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
         :token="receiveToken"
         :model-value="receiveAmount"
         :secondary="secondaryReceive"
+        :disabled="txBusy"
         @update:model-value="setReceive"
       />
 
@@ -359,74 +497,76 @@ watch([() => amount.value, () => mode.value, () => slippageBps.value], () => {
         :detail="warning.detail"
       />
 
-      <PolicyNotice
-        v-if="tradeBlocker"
-        tone="critical"
-        :title="tradeBlocker.title"
-        :detail="tradeBlocker.detail"
-      >
+      <PolicyNotice v-if="tradeBlocker" tone="critical" :title="tradeBlocker.title" :detail="tradeBlocker.detail">
         <button
           v-if="tradeBlocker.maxAmount !== undefined && mode === 'exactIn'"
           type="button"
-          class="mt-2 text-xs font-medium text-primary hover:underline"
+          class="mt-2 rounded text-xs font-medium text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           @click="setPay(Number((tradeBlocker.maxAmount * 0.999).toFixed(6)))"
         >
           Use the largest amount that clears
         </button>
       </PolicyNotice>
 
-      <!-- Transaction states -->
-      <PolicyNotice
-        v-if="txStage === 'confirmed'"
-        tone="success"
-        title="Swap confirmed"
-        :detail="
-          simulated
-            ? 'Simulated settlement — execution is not yet wired to the permissioned router, so nothing settled on-chain.'
-            : 'Your swap settled against the pool.'
-        "
-      >
-        <p v-if="txHash" class="mt-1.5 truncate font-mono text-[11px] text-ink-muted">
-          {{ txHash }}
-        </p>
-        <button type="button" class="mt-2 text-xs font-medium text-primary hover:underline" @click="resetTx()">
-          Make another swap
-        </button>
-      </PolicyNotice>
+      <!-- Transaction states. Each is announced, so a screen reader follows the
+           swap without watching the button. -->
+      <TradeReceipt
+        v-if="txStage === 'confirmed' && outcome && acceptedQuote && wallet.address"
+        :asset="asset"
+        :quote="acceptedQuote"
+        :outcome="outcome"
+        :wallet="wallet.address"
+        @again="tradeAgain"
+        @portfolio="goToPortfolio"
+      />
 
       <PolicyNotice
-        v-else-if="txStage === 'failed' && txFailure"
-        tone="critical"
+        v-else-if="txFailure"
+        :tone="failureTone"
         :title="txFailure.title"
         :detail="txFailure.detail"
       >
-        <button type="button" class="mt-2 text-xs font-medium text-primary hover:underline" @click="resetTx()">
-          Dismiss
-        </button>
+        <div class="mt-2 flex flex-wrap gap-3">
+          <button
+            v-if="txFailure.suggestedAmount !== undefined"
+            type="button"
+            class="rounded text-xs font-medium text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            @click="useSuggestedAmount(txFailure.suggestedAmount)"
+          >
+            Use {{ txFailure.suggestedAmount.toLocaleString('en-US', { maximumFractionDigits: 4 }) }} instead
+          </button>
+          <button
+            v-else-if="txFailure.retryable"
+            type="button"
+            class="rounded text-xs font-medium text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            @click="retry"
+          >
+            Try again
+          </button>
+          <button
+            type="button"
+            class="rounded text-xs font-medium text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            @click="tradeAgain"
+          >
+            Start over
+          </button>
+        </div>
       </PolicyNotice>
 
-      <PolicyNotice
-        v-else-if="txBusy"
-        tone="info"
-        busy
-        :title="actionLabel"
-        :detail="
-          txStage === 'approve_signing' || txStage === 'swap_signing'
-            ? 'Waiting for you to sign in your wallet.'
-            : 'Waiting for the network to confirm.'
-        "
-      />
+      <PolicyNotice v-else-if="txBusy" tone="info" busy :title="actionLabel" :detail="stageDetail" />
 
       <button
         v-else
         type="button"
-        class="w-full rounded-md py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40"
-        :class="needsApproval ? 'border border-primary text-primary' : 'bg-primary text-on-accent'"
+        class="w-full rounded-md py-2.5 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
+        :class="nextStep ? 'border border-primary text-primary' : 'bg-primary text-on-accent'"
         :disabled="!canSubmit"
         @click="onAction"
       >
         {{ amount === null || amount === 0 ? 'Enter an amount' : actionLabel }}
       </button>
+
+      <p v-if="stepHint" class="text-[11px] leading-relaxed text-ink-muted">{{ stepHint }}</p>
 
       <p class="text-[11px] leading-relaxed text-ink-muted">
         NAV published {{ navAge }}. The pool refuses swaps that would start or land outside its permitted price range,

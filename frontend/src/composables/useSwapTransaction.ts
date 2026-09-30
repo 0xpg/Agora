@@ -1,28 +1,44 @@
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
+import type { Address, Hex } from 'viem'
+import { describeExecutionError } from '@/execution/errors'
+import type { ExecutionOutcome } from '@/execution/swapExecutor'
 
 /**
  * The stages a swap passes through, from the investor's point of view. Approval
- * and the swap itself each need a wallet signature and then a confirmation, so
- * each has a "waiting on you" stage and a "waiting on the chain" stage — the two
- * feel different and read differently.
+ * and the swap each need a signature and then a confirmation, and those two
+ * waits feel different: one is waiting on you, the other on the network.
  */
 export type SwapStage =
   | 'idle'
-  | 'approve_signing'
-  | 'approve_confirming'
-  | 'swap_signing'
-  | 'swap_confirming'
+  /** Reading chain state and simulating against the live pool before prompting. */
+  | 'checking'
+  /** A preparation transaction is waiting for a signature, then for a block. */
+  | 'prepare_signature'
+  | 'prepare_submitted'
+  | 'swap_signature'
+  | 'swap_submitted'
   | 'confirmed'
+  | 'rejected'
+  | 'reverted'
   | 'failed'
 
+/** Why a swap did not complete. `kind` decides how it is presented. */
 export interface SwapFailure {
+  kind: 'rejected' | 'reverted' | 'failed'
+  /** The contract error name, when the revert decoded to one. */
+  code?: string
   title: string
   detail: string
-  /** True when retrying could plausibly work — a rejection, not a refusal. */
+  /** False when retrying the same trade cannot work — a refusal, not a mishap. */
   retryable: boolean
+  /**
+   * An amount that would clear, in the units the investor is typing, when the
+   * refusal is about size. Offered as a one-tap correction.
+   */
+  suggestedAmount?: number
 }
 
-/** What the executor is asked to do. Amounts are already in display units. */
+/** What the executor is asked to do. Amounts are in display units. */
 export interface SwapRequest {
   assetId: string
   side: 'buy' | 'sell'
@@ -32,156 +48,254 @@ export interface SwapRequest {
   /** The slippage-bounded worst acceptable result. */
   bound: number
   slippageBps: number
-  /** Pool price limit encoded as a Q64.96 square root. */
-  sqrtPriceLimitX96: bigint
+  /** Pool price before the swap, and where the quote says it would land. */
+  spotPrice: number
+  postSwapPrice: number
+  /** The permitted price range in force, which the swap may not be priced outside. */
+  bandLower: number
+  bandUpper: number
 }
 
 /**
- * Submits approvals and swaps. The only implementation today is the simulator
- * below; a live one routes through the permissioned router, which is the route
- * that establishes the eligible end user. Keeping it behind this interface is
- * what lets the panel's stages be real before the router address exists.
+ * One transaction that has to land before the swap can be sent — registering for
+ * access, funding the wallet from a demo faucet, granting the router an
+ * allowance. Each is a single signature and names itself, so nobody is asked to
+ * sign something the screen has not explained.
+ */
+export interface PreparationStep {
+  id: 'register' | 'mint' | 'approve'
+  /** What the button says while this step is the next one. */
+  label: string
+  /** What it does and why. */
+  detail: string
+  /** The call itself, so it can be simulated ahead of the swap as well as sent. */
+  to: Address
+  data: Hex
+  send: () => Promise<Hex>
+}
+
+/**
+ * Submits preparation transactions and swaps against a deployed market. Sending
+ * and confirming are separate calls so the UI can distinguish "waiting for your
+ * signature" from "waiting for the network".
  */
 export interface SwapExecutor {
-  /** True when the input token still needs an allowance for this request. */
-  needsApproval: (request: SwapRequest) => boolean
-  approve: (request: SwapRequest) => Promise<{ hash: string }>
-  swap: (request: SwapRequest) => Promise<{ hash: string }>
+  /** False when no deployed market backs this asset, so nothing can be sent. */
+  readonly ready: boolean
+  /** The spender an approval is granted to. */
+  readonly routerAddress: Address | null
+  /** Everything outstanding before this trade can be sent, in order. */
+  prepare: (request: SwapRequest) => Promise<PreparationStep[]>
   /**
-   * Re-checked immediately before signing. The pool can refuse between quote and
-   * execution — NAV ages out, the issuer pauses, another swap moves price to the
-   * edge of the range — and that is a failure the investor has to see.
+   * Re-checked immediately before prompting. The pool can refuse between quote
+   * and execution — NAV ages out, the issuer pauses, another swap moves price to
+   * the edge of the range — and that is a refusal the investor has to see
+   * before signing rather than as a failed transaction afterwards.
    */
-  preflight?: (request: SwapRequest) => SwapFailure | null
-  /** True when settlement is simulated rather than submitted to a chain. */
-  readonly simulated: boolean
-}
-
-function randomHash(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32))
-  return `0x${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`
+  preflight: (request: SwapRequest) => Promise<SwapFailure | null>
+  sendSwap: (request: SwapRequest) => Promise<Hex>
+  waitFor: (hash: Hex, request: SwapRequest) => Promise<ExecutionOutcome>
 }
 
 /**
- * Stands in for the router until deployed addresses land in
- * `config/addresses.json`. It does not touch a chain: it waits, then reports
- * success, so the panel's stages can be built and reviewed now. The panel says
- * plainly that nothing settled.
+ * Stands in for assets that have no deployed market on this chain. It cannot
+ * send anything, and the panel says so rather than offering a button that
+ * would do nothing.
  */
-export function createSimulatedExecutor(options: { preflight?: (r: SwapRequest) => SwapFailure | null } = {}): SwapExecutor {
-  // Allowances granted in this session, keyed by the token the swap spends.
-  const allowances = new Set<string>()
-  const key = (r: SwapRequest) => `${r.assetId}:${r.side}`
-  const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
-
+export function createUnavailableExecutor(): SwapExecutor {
+  const refuse = async (): Promise<never> => {
+    throw new Error('This asset has no deployed market on this network.')
+  }
   return {
-    simulated: true,
-    needsApproval: (request) => !allowances.has(key(request)),
-    approve: async (request) => {
-      await wait(900)
-      allowances.add(key(request))
-      return { hash: randomHash() }
-    },
-    swap: async () => {
-      await wait(1400)
-      return { hash: randomHash() }
-    },
-    preflight: options.preflight,
+    ready: false,
+    routerAddress: null,
+    prepare: async () => [],
+    preflight: async () => ({
+      kind: 'failed',
+      title: 'Not tradable on this network',
+      detail: 'This asset is listed for reference. No market has been deployed for it on the configured chain yet.',
+      retryable: false,
+    }),
+    sendSwap: refuse,
+    waitFor: refuse,
   }
 }
 
 /**
- * Drives one swap through approval, submission and confirmation, and holds the
- * failure if any stage does not complete.
+ * Drives one swap from approval through confirmation, holding whatever stopped
+ * it. The investor's entered amounts are deliberately not this composable's to
+ * clear — a failed attempt has to leave them in place to be corrected.
  */
-export function useSwapTransaction(executor: SwapExecutor) {
+export function useSwapTransaction(executor: () => SwapExecutor) {
   const stage = ref<SwapStage>('idle')
-  const txHash = ref<string | null>(null)
+  const preparationHash = ref<Hex | null>(null)
+  const swapHash = ref<Hex | null>(null)
   const failure = ref<SwapFailure | null>(null)
-  const lastRequest = ref<SwapRequest | null>(null)
+  // Shallow: an outcome is a plain snapshot and never mutated in place.
+  const outcome = shallowRef<ExecutionOutcome | null>(null)
+  const settledRequest = shallowRef<SwapRequest | null>(null)
+  /** What still has to happen before the swap, refreshed as the trade changes. */
+  const steps = shallowRef<PreparationStep[]>([])
+  /** The step currently being signed or confirmed. */
+  const activeStep = shallowRef<PreparationStep | null>(null)
+
+  // One in-flight attempt at a time. The button is disabled while busy, but a
+  // double submit can still arrive from a keyboard repeat or a double tap, and
+  // that must never become two transactions.
+  let inFlight = false
 
   const busy = computed(
     () =>
-      stage.value === 'approve_signing' ||
-      stage.value === 'approve_confirming' ||
-      stage.value === 'swap_signing' ||
-      stage.value === 'swap_confirming',
+      stage.value === 'checking' ||
+      stage.value === 'prepare_signature' ||
+      stage.value === 'prepare_submitted' ||
+      stage.value === 'swap_signature' ||
+      stage.value === 'swap_submitted',
+  )
+
+  const settled = computed(
+    () => stage.value === 'confirmed' || stage.value === 'rejected' || stage.value === 'reverted' || stage.value === 'failed',
   )
 
   function reset() {
     stage.value = 'idle'
-    txHash.value = null
+    preparationHash.value = null
+    swapHash.value = null
     failure.value = null
-    lastRequest.value = null
+    outcome.value = null
+    settledRequest.value = null
+  }
+
+  /** Clears the failure but keeps the entered trade, ready to be retried. */
+  function dismissFailure() {
+    failure.value = null
+    if (stage.value === 'rejected' || stage.value === 'reverted' || stage.value === 'failed') {
+      stage.value = 'idle'
+    }
   }
 
   function fail(next: SwapFailure) {
     failure.value = next
-    stage.value = 'failed'
+    stage.value = next.kind
   }
 
-  function describe(error: unknown): SwapFailure {
-    const message = error instanceof Error ? error.message : String(error)
-    // Wallets report a user-cancelled prompt as a rejection; it is not an error
-    // worth alarming anyone about.
-    if (/reject|denied|cancel/i.test(message)) {
-      return { title: 'Signature declined', detail: 'You dismissed the request in your wallet. Nothing was submitted.', retryable: true }
+  /** The next outstanding preparation step, or null when the swap can be sent. */
+  const nextStep = computed<PreparationStep | null>(() => steps.value[0] ?? null)
+
+  async function refreshSteps(request: SwapRequest | null) {
+    if (!request || !executor().ready) {
+      steps.value = []
+      return
     }
-    return { title: 'Transaction failed', detail: message, retryable: true }
-  }
-
-  function needsApproval(request: SwapRequest): boolean {
-    return executor.needsApproval(request)
-  }
-
-  async function approve(request: SwapRequest) {
-    failure.value = null
-    lastRequest.value = request
-    stage.value = 'approve_signing'
     try {
-      // The signature prompt and the confirmation are separate waits, so the
-      // stage advances as soon as the wallet hands the transaction back.
-      const pending = executor.approve(request)
-      stage.value = 'approve_confirming'
-      await pending
+      steps.value = await executor().prepare(request)
+    } catch {
+      // Unreadable chain state should not strand the panel: leave the steps as
+      // they were and let the submit path report whatever actually fails.
+    }
+  }
+
+  /** Signs and confirms the next preparation transaction. */
+  async function runNextStep(request: SwapRequest) {
+    const step = nextStep.value
+    if (!step || inFlight) return
+    inFlight = true
+    failure.value = null
+    activeStep.value = step
+    try {
+      stage.value = 'prepare_signature'
+      let hash: Hex
+      try {
+        hash = await step.send()
+      } catch (error) {
+        fail(describeExecutionError(error))
+        return
+      }
+      preparationHash.value = hash
+      stage.value = 'prepare_submitted'
+
+      const result = await executor().waitFor(hash, request)
+      if (result.status === 'reverted') {
+        fail({
+          kind: 'reverted',
+          title: `${step.label} failed`,
+          detail: 'The transaction was mined but reverted, so nothing changed. Nothing was spent beyond gas.',
+          retryable: true,
+        })
+        return
+      }
       stage.value = 'idle'
+      // Re-read rather than assuming: the step may not have cleared everything.
+      await refreshSteps(request)
     } catch (error) {
-      fail(describe(error))
+      fail(describeExecutionError(error))
+    } finally {
+      inFlight = false
+      activeStep.value = null
     }
   }
 
   async function submit(request: SwapRequest) {
+    if (inFlight) return
+    inFlight = true
     failure.value = null
-    lastRequest.value = request
-
-    const refusal = executor.preflight?.(request)
-    if (refusal) {
-      fail(refusal)
-      return
-    }
-
-    stage.value = 'swap_signing'
     try {
-      const pending = executor.swap(request)
-      stage.value = 'swap_confirming'
-      const { hash } = await pending
-      txHash.value = hash
+
+      stage.value = 'checking'
+      const refusal = await executor().preflight(request)
+      if (refusal) {
+        fail(refusal)
+        return
+      }
+
+      stage.value = 'swap_signature'
+      let hash: Hex
+      try {
+        hash = await executor().sendSwap(request)
+      } catch (error) {
+        fail(describeExecutionError(error))
+        return
+      }
+      swapHash.value = hash
+      stage.value = 'swap_submitted'
+
+      const result = await executor().waitFor(hash, request)
+      outcome.value = result
+      settledRequest.value = request
+      if (result.status === 'reverted') {
+        fail({
+          kind: 'reverted',
+          title: 'The transaction reverted',
+          detail:
+            'It was mined but the pool rejected it, so nothing was exchanged. Conditions can change between quoting and confirming — check the pool state and try again.',
+          retryable: true,
+        })
+        return
+      }
       stage.value = 'confirmed'
     } catch (error) {
-      fail(describe(error))
+      fail(describeExecutionError(error))
+    } finally {
+      inFlight = false
     }
   }
 
   return {
     stage,
-    txHash,
+    preparationHash,
+    swapHash,
     failure,
-    lastRequest,
+    outcome,
+    settledRequest,
+    steps,
+    nextStep,
+    activeStep,
     busy,
-    simulated: executor.simulated,
-    needsApproval,
-    approve,
+    settled,
+    refreshSteps,
+    runNextStep,
     submit,
     reset,
+    dismissFailure,
   }
 }

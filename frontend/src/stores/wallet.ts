@@ -93,10 +93,18 @@ export const useWalletStore = defineStore('wallet', () => {
     driver.connect()
   }
 
-  async function disconnect() {
-    if (!driver) return
+  async function disconnect(): Promise<boolean> {
+    if (!driver) return false
     error.value = null
-    await driver.disconnect()
+    try {
+      await driver.disconnect()
+      return true
+    } catch {
+      // The session is still live, so say so rather than leaving the UI to
+      // guess whether it worked.
+      error.value = "We couldn't sign you out just now. Please try again in a moment."
+      return false
+    }
   }
 
   async function switchToTargetChain() {
