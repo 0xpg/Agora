@@ -10,6 +10,13 @@ const publicClient = createPublicClient({ chain: TARGET_CHAIN, transport: http()
 
 const erc20Abi = parseAbi([
   'function approve(address spender, uint256 amount) returns (bool)',
+  'function balanceOf(address account) view returns (uint256)',
+  'function mint(address to, uint256 amount)',
+])
+
+const registryAbi = parseAbi([
+  'function isEligible(address investor) view returns (bool)',
+  'function register()',
 ])
 
 const swapRouterAbi = parseAbi([
@@ -35,6 +42,45 @@ export function createDemoMarketExecutor(
     needsApproval: (request) => approvedToken !== payToken(request),
     approve: async (request) => {
       const client = await wallet.getWalletClient()
+      const account = client.account!.address
+      const eligible = await publicClient.readContract({
+        address: market.identityRegistry as Address,
+        abi: registryAbi,
+        functionName: 'isEligible',
+        args: [account],
+      })
+      if (!eligible) {
+        const registerHash = await client.writeContract({
+          account: client.account!,
+          chain: TARGET_CHAIN,
+          address: market.identityRegistry as Address,
+          abi: registryAbi,
+          functionName: 'register',
+        })
+        await publicClient.waitForTransactionReceipt({ hash: registerHash })
+      }
+
+      if (request.side === 'buy') {
+        const required = units(request.amountIn)
+        const balance = await publicClient.readContract({
+          address: market.settlementToken as Address,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [account],
+        })
+        if (balance < required) {
+          const mintHash = await client.writeContract({
+            account: client.account!,
+            chain: TARGET_CHAIN,
+            address: market.settlementToken as Address,
+            abi: erc20Abi,
+            functionName: 'mint',
+            args: [account, required - balance],
+          })
+          await publicClient.waitForTransactionReceipt({ hash: mintHash })
+        }
+      }
+
       const hash = await client.writeContract({
         account: client.account!,
         chain: TARGET_CHAIN,

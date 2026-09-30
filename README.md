@@ -26,7 +26,7 @@ Privy wallet -> swap router -> singleton pool manager -> policy hook
 | `MarketFactory` | Deploys the contracts for a new market |
 | Privy | Wallet and email onboarding |
 
-Privy handles onboarding. For the hackathon demo, the issuer grants each wallet an on-chain access tier through `IdentityRegistry`; external identity attestations are intentionally out of scope.
+Privy handles onboarding. For the hackathon demo, wallets self-register on-chain and can mint demo settlement tokens during their first trade; external identity attestations are intentionally out of scope.
 
 ## Market controls
 
