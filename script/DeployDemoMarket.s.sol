@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {Script, console} from "forge-std/Script.sol";
+import {MarketFactory} from "../src/MarketFactory.sol";
+import {PermissionedAssetToken} from "../src/PermissionedAssetToken.sol";
+import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {NAVOracle} from "../src/NAVOracle.sol";
+import {AgoraHook} from "../src/AgoraHook.sol";
+import {DemoSettlementToken} from "../src/DemoSettlementToken.sol";
+import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
+import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
+import {HookMiner} from "@uniswap/v4-periphery/test/shared/HookMiner.sol";
+
+contract DeployDemoMarket is Script {
+    address private constant MARKET_FACTORY = 0x309941F55DB597C05D0A9628aDeFD7ff05C10e2d;
+    address private constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    uint160 private constant PRICE = 1 << 96;
+
+    function run() external {
+        address issuer = msg.sender;
+        vm.startBroadcast();
+
+        DemoSettlementToken settlement = new DemoSettlementToken();
+        (address tokenAddress, address oracleAddress, address registryAddress,) =
+            MarketFactory(MARKET_FACTORY).deployMarket("Agora Demo Note", "ADN", 1 days);
+
+        PermissionedAssetToken token = PermissionedAssetToken(tokenAddress);
+        NAVOracle oracle = NAVOracle(oracleAddress);
+        IdentityRegistry registry = IdentityRegistry(registryAddress);
+        token.acceptOwnership();
+        registry.setEligibility(issuer, 1);
+        oracle.setNAV(1 ether);
+
+        _deployPool(issuer, token, settlement, oracle);
+
+        vm.stopBroadcast();
+
+        console.log("Asset token:", tokenAddress);
+        console.log("Settlement token:", address(settlement));
+        console.log("Identity registry:", registryAddress);
+        console.log("NAV oracle:", oracleAddress);
+    }
+
+    function _deployPool(address issuer, PermissionedAssetToken token, DemoSettlementToken settlement, NAVOracle oracle)
+        private
+    {
+        PoolManager manager = new PoolManager(issuer);
+        token.setExemptOperator(address(manager), true);
+
+        Currency assetCurrency = Currency.wrap(address(token));
+        Currency settlementCurrency = Currency.wrap(address(settlement));
+        (Currency currency0, Currency currency1) = Currency.unwrap(assetCurrency) < Currency.unwrap(settlementCurrency)
+            ? (assetCurrency, settlementCurrency)
+            : (settlementCurrency, assetCurrency);
+
+        AgoraHook hook = _deployHook(manager, oracle, currency0, currency1, issuer);
+
+        hook.syncPriceBand(PRICE * 95 / 100, PRICE * 105 / 100);
+        hook.setRiskControls(PRICE, 250, 10_000 ether, 5_000 ether, 1 hours);
+
+        PoolKey memory key = PoolKey(currency0, currency1, LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, IHooks(address(hook)));
+        manager.initialize(key, PRICE);
+
+        PoolModifyLiquidityTest liquidityRouter = new PoolModifyLiquidityTest(manager);
+        PoolSwapTest swapRouter = new PoolSwapTest(manager);
+        token.mint(issuer, 100_000 ether);
+        settlement.mint(issuer, 100_000 ether);
+        token.approve(address(liquidityRouter), type(uint256).max);
+        settlement.approve(address(liquidityRouter), type(uint256).max);
+        liquidityRouter.modifyLiquidity(
+            key, ModifyLiquidityParams({tickLower: -600, tickUpper: 600, liquidityDelta: 100_000 ether, salt: 0}), ""
+        );
+
+        console.log("Pool manager:", address(manager));
+        console.log("Hook:", address(hook));
+        console.log("Liquidity router:", address(liquidityRouter));
+        console.log("Swap router:", address(swapRouter));
+    }
+
+    function _deployHook(PoolManager manager, NAVOracle oracle, Currency currency0, Currency currency1, address issuer)
+        private
+        returns (AgoraHook hook)
+    {
+        bytes memory args = abi.encode(
+            IPoolManager(address(manager)), oracle, currency0, currency1, issuer, uint24(500), uint24(5_000)
+        );
+        uint160 flags = Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG;
+        (address expectedHook, bytes32 salt) =
+            HookMiner.find(CREATE2_DEPLOYER, flags, type(AgoraHook).creationCode, args);
+        hook = new AgoraHook{salt: salt}(manager, oracle, currency0, currency1, issuer, 500, 5_000);
+        require(address(hook) == expectedHook, "hook address mismatch");
+    }
+}
