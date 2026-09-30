@@ -10,6 +10,7 @@ import {
   useSwapTransaction,
   type SwapRequest,
 } from '@/composables/useSwapTransaction'
+import { createDemoMarketExecutor } from '@/composables/useDemoMarketExecutor'
 import { assessSwap, maxPayAmount, type QuoteMode, type SwapSide } from '@/utils/quote'
 import { formatAge, formatCurrency } from '@/utils/format'
 import TokenAmountInput from '@/components/TokenAmountInput.vue'
@@ -71,7 +72,7 @@ function setReceive(value: number | null) {
   amount.value = value
 }
 
-const executor = createSimulatedExecutor({
+const executorOptions = {
   // The pool can refuse between quote and signature. This is the same check the
   // panel renders, re-run at the moment of submission.
   preflight: () => {
@@ -79,7 +80,10 @@ const executor = createSimulatedExecutor({
     if (!refusal) return null
     return { title: refusal.title, detail: refusal.detail, retryable: false }
   },
-})
+}
+const executor = props.asset.id === 'agora-demo-note'
+  ? createDemoMarketExecutor(wallet, executorOptions)
+  : createSimulatedExecutor(executorOptions)
 
 const {
   stage: txStage,
@@ -133,6 +137,9 @@ const request = computed<SwapRequest | null>(() => {
     amountOut: current.amountOut,
     bound: current.slippageBound,
     slippageBps: slippageBps.value,
+    sqrtPriceLimitX96: BigInt(Math.floor(Math.sqrt(
+      current.postSwapPrice * (side.value === 'buy' ? 1 + slippageBps.value / 10_000 : 1 - slippageBps.value / 10_000),
+    ) * 2 ** 96)),
   }
 })
 

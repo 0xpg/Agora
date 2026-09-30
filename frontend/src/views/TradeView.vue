@@ -132,7 +132,7 @@ const infoRows = computed<InfoRow[]>(() => [
 
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div class="lg:col-span-1 lg:order-2">
-          <SwapPanel :asset="asset" :investor="investor" @update:post-swap-price="quotedPrice = $event" />
+          <SwapPanel :key="asset.id" :asset="asset" :investor="investor" @update:post-swap-price="quotedPrice = $event" />
         </div>
 
         <div class="lg:col-span-2 lg:order-1">

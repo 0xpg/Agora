@@ -32,6 +32,8 @@ export interface SwapRequest {
   /** The slippage-bounded worst acceptable result. */
   bound: number
   slippageBps: number
+  /** Pool price limit encoded as a Q64.96 square root. */
+  sqrtPriceLimitX96: bigint
 }
 
 /**
