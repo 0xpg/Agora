@@ -6,6 +6,7 @@ import { formatCurrency, formatPercent } from '@/utils/format'
 import { premiumDiscountPct } from '@/utils/pricing'
 import PriceVsNavChart from '@/components/PriceVsNavChart.vue'
 import EligibilityBadge from '@/components/EligibilityBadge.vue'
+import PoolStatusBadge from '@/components/PoolStatusBadge.vue'
 
 defineProps<{
   assets: TokenizedAsset[]
@@ -28,7 +29,7 @@ defineProps<{
             <th class="px-4 py-3 text-right font-medium">24h</th>
             <th class="w-28 px-4 py-3 font-medium">Trend</th>
             <th class="px-4 py-3 font-medium">Eligibility</th>
-            <th class="px-4 py-3 font-medium">Market</th>
+            <th class="px-4 py-3 font-medium">Pool</th>
           </tr>
         </thead>
         <tbody>
@@ -75,7 +76,7 @@ defineProps<{
                 <EligibilityBadge :state="eligibilityState(asset, investor)" />
               </td>
               <td class="px-4 py-3">
-                <span class="text-xs font-medium text-success">AMM live</span>
+                <PoolStatusBadge :asset="asset" />
               </td>
             </tr>
           </RouterLink>

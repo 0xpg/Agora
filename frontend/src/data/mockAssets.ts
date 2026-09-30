@@ -1,12 +1,16 @@
 import type {
   AssetClass,
   MarketRules,
-  MarketStatus,
   NavPoint,
+  PoolPolicy,
   PoolType,
+  TemporaryPolicy,
   TokenizedAsset,
   EligibilityTier,
 } from '@/types/market'
+import { poolCondition } from '@/utils/quote'
+
+const HOUR = 3600
 
 // Deterministic PRNG so charts stay stable across reloads instead of reshuffling.
 function mulberry32(seed: number) {
@@ -31,7 +35,16 @@ function hashSeed(input: string): number {
 const DAY_SECONDS = 86400
 const HISTORY_DAYS = 180
 
-function buildHistory(seedKey: string, startValue: number, driftPerDay: number, volatility: number) {
+function buildHistory(
+  seedKey: string,
+  startValue: number,
+  driftPerDay: number,
+  volatility: number,
+  // Where the pool trades relative to NAV, in basis points. The noise around it
+  // is small, so this is what decides whether a pool sits mid-range, past its
+  // rebalancing guard, or outside its permitted range altogether.
+  premiumBps: number,
+) {
   const rand = mulberry32(hashSeed(seedKey))
   const now = Math.floor(Date.now() / 1000 / DAY_SECONDS) * DAY_SECONDS
   const start = now - HISTORY_DAYS * DAY_SECONDS
@@ -48,11 +61,71 @@ function buildHistory(seedKey: string, startValue: number, driftPerDay: number, 
 
     // Price trades around NAV with its own smaller-amplitude premium/discount noise.
     const spread = (rand() - 0.5) * 2 * (volatility * 0.6)
-    const price = nav * (1 + spread)
+    const price = nav * (1 + premiumBps / 10_000 + spread)
     priceHistory.push({ time, value: Number(price.toFixed(4)) })
   }
 
   return { navHistory, priceHistory }
+}
+
+/**
+ * How a pool's policy is written in this fixture: widths and ages relative to
+ * NAV and to now, so the fixture stays meaningful whatever price the generator
+ * produces. `makeAsset` resolves it into the absolute prices and timestamps the
+ * hook actually holds.
+ */
+interface PolicySpec {
+  /** Half-width of the permitted price range, in bps either side of NAV. */
+  bandWidthBps: number
+  baseFeeBps: number
+  edgeFeeBps: number
+  directionalGuardBps: number
+  maxTradeNotional: number
+  largeTradeNotional: number
+  /** How long ago the issuer published the NAV this pool is anchored to. */
+  navAgeSeconds: number
+  navMaxAgeSeconds: number
+  largeTradeMaxNavAgeSeconds: number
+  /** False while the issuer has published a NAV but not yet re-anchored the range. */
+  bandSynced?: boolean
+  paused?: boolean
+  /** A live issuer override, given as a widened range and raised fees. */
+  temporary?: { bandWidthBps: number; baseFeeBps: number; edgeFeeBps: number; expiresInSeconds: number }
+}
+
+function resolvePolicy(spec: PolicySpec, nav: number, now: number): PoolPolicy {
+  const navUpdatedAt = now - spec.navAgeSeconds
+  const width = spec.bandWidthBps / 10_000
+
+  let temporaryPolicy: TemporaryPolicy | null = null
+  if (spec.temporary) {
+    const tempWidth = spec.temporary.bandWidthBps / 10_000
+    temporaryPolicy = {
+      bandLower: nav * (1 - tempWidth),
+      bandUpper: nav * (1 + tempWidth),
+      baseFeeBps: spec.temporary.baseFeeBps,
+      edgeFeeBps: spec.temporary.edgeFeeBps,
+      expiresAt: now + spec.temporary.expiresInSeconds,
+    }
+  }
+
+  return {
+    bandLower: nav * (1 - width),
+    bandUpper: nav * (1 + width),
+    targetPrice: nav,
+    baseFeeBps: spec.baseFeeBps,
+    edgeFeeBps: spec.edgeFeeBps,
+    directionalGuardBps: spec.directionalGuardBps,
+    maxTradeNotional: spec.maxTradeNotional,
+    largeTradeNotional: spec.largeTradeNotional,
+    navUpdatedAt,
+    navMaxAgeSeconds: spec.navMaxAgeSeconds,
+    largeTradeMaxNavAgeSeconds: spec.largeTradeMaxNavAgeSeconds,
+    // An unsynced pool is one whose range still points at the previous NAV.
+    bandSyncedNavUpdatedAt: spec.bandSynced === false ? navUpdatedAt - 6 * HOUR : navUpdatedAt,
+    paused: spec.paused ?? false,
+    temporaryPolicy,
+  }
 }
 
 function makeAsset(input: {
@@ -67,6 +140,8 @@ function makeAsset(input: {
   startNav: number
   driftPerDay: number
   volatility: number
+  premiumBps: number
+  policy: PolicySpec
   yieldPct: number | null
   liquidity: number
   volume30d: number
@@ -75,10 +150,15 @@ function makeAsset(input: {
   totalSupply: number
   minInvestment: number
   requiredTiers: EligibilityTier[]
-  marketStatus: MarketStatus
   rules: MarketRules
 }): TokenizedAsset {
-  const { navHistory, priceHistory } = buildHistory(input.id, input.startNav, input.driftPerDay, input.volatility)
+  const { navHistory, priceHistory } = buildHistory(
+    input.id,
+    input.startNav,
+    input.driftPerDay,
+    input.volatility,
+    input.premiumBps,
+  )
   const nav = navHistory[navHistory.length - 1]!.value
   const lastPrice = priceHistory[priceHistory.length - 1]!.value
   const prevPrice = priceHistory[priceHistory.length - 2]!.value
@@ -104,8 +184,8 @@ function makeAsset(input: {
     totalSupply: input.totalSupply,
     minInvestment: input.minInvestment,
     requiredTiers: input.requiredTiers,
-    marketStatus: input.marketStatus,
     rules: input.rules,
+    policy: resolvePolicy(input.policy, nav, Math.floor(Date.now() / 1000)),
     navHistory,
     priceHistory,
   }
@@ -124,6 +204,20 @@ export const mockAssets: TokenizedAsset[] = [
     startNav: 102,
     driftPerDay: 0.0003,
     volatility: 0.006,
+    premiumBps: -195,
+    policy: {
+      // Trading below the guard, so the pool takes only buys until price
+      // returns toward NAV. NAV is older than large trades are allowed to use.
+      bandWidthBps: 250,
+      baseFeeBps: 12,
+      edgeFeeBps: 120,
+      directionalGuardBps: 80,
+      maxTradeNotional: 400_000,
+      largeTradeNotional: 150_000,
+      navAgeSeconds: 3 * HOUR,
+      navMaxAgeSeconds: 24 * HOUR,
+      largeTradeMaxNavAgeSeconds: HOUR,
+    },
     yieldPct: 5.8,
     liquidity: 312_000,
     volume30d: 420_000,
@@ -132,9 +226,7 @@ export const mockAssets: TokenizedAsset[] = [
     totalSupply: 2_500_000,
     minInvestment: 25_000,
     requiredTiers: ['accredited', 'qualified_purchaser', 'institutional'],
-    marketStatus: 'open',
     rules: {
-      tradingWindow: 'Mon-Fri, 09:00-16:00 ET',
       lockupPeriodDays: 90,
       minHoldingPeriodDays: 30,
       maxOwnershipPct: 5,
@@ -153,6 +245,21 @@ export const mockAssets: TokenizedAsset[] = [
     startNav: 98,
     driftPerDay: 0.00025,
     volatility: 0.003,
+    premiumBps: 60,
+    policy: {
+      // Running under a temporary issuer override: a wider range and raised
+      // fees that lapse on their own.
+      bandWidthBps: 200,
+      baseFeeBps: 20,
+      edgeFeeBps: 150,
+      directionalGuardBps: 0,
+      maxTradeNotional: 500_000,
+      largeTradeNotional: 200_000,
+      navAgeSeconds: 2 * HOUR,
+      navMaxAgeSeconds: 24 * HOUR,
+      largeTradeMaxNavAgeSeconds: 4 * HOUR,
+      temporary: { bandWidthBps: 400, baseFeeBps: 45, edgeFeeBps: 300, expiresInSeconds: 45 * 60 },
+    },
     yieldPct: 9.75,
     liquidity: 458_000,
     volume30d: 210_000,
@@ -161,9 +268,7 @@ export const mockAssets: TokenizedAsset[] = [
     totalSupply: 1_800_000,
     minInvestment: 100_000,
     requiredTiers: ['qualified_purchaser', 'institutional'],
-    marketStatus: 'open',
     rules: {
-      tradingWindow: 'Mon-Fri, 09:00-16:00 ET',
       lockupPeriodDays: 180,
       minHoldingPeriodDays: 90,
       maxOwnershipPct: 10,
@@ -182,6 +287,20 @@ export const mockAssets: TokenizedAsset[] = [
     startNav: 100,
     driftPerDay: 0.00012,
     volatility: 0.0012,
+    premiumBps: 18,
+    policy: {
+      // The deepest, healthiest pool — the one Trade opens by default. Its
+      // per-swap cap is low enough that oversized trades are easy to hit.
+      bandWidthBps: 120,
+      baseFeeBps: 6,
+      edgeFeeBps: 60,
+      directionalGuardBps: 0,
+      maxTradeNotional: 250_000,
+      largeTradeNotional: 100_000,
+      navAgeSeconds: 40 * 60,
+      navMaxAgeSeconds: 24 * HOUR,
+      largeTradeMaxNavAgeSeconds: 2 * HOUR,
+    },
     yieldPct: 4.35,
     liquidity: 890_000,
     volume30d: 1_650_000,
@@ -190,9 +309,7 @@ export const mockAssets: TokenizedAsset[] = [
     totalSupply: 5_000_000,
     minInvestment: 1_000,
     requiredTiers: ['retail', 'accredited', 'qualified_purchaser', 'institutional'],
-    marketStatus: 'open',
     rules: {
-      tradingWindow: '24/5, market hours align with US Treasury market',
       lockupPeriodDays: 0,
       minHoldingPeriodDays: 1,
       maxOwnershipPct: 2,
@@ -211,6 +328,20 @@ export const mockAssets: TokenizedAsset[] = [
     startNav: 250,
     driftPerDay: 0.0004,
     volatility: 0.004,
+    premiumBps: 70,
+    policy: {
+      // A NAV has just been published and the range is not yet re-anchored to it.
+      bandWidthBps: 300,
+      baseFeeBps: 30,
+      edgeFeeBps: 250,
+      directionalGuardBps: 0,
+      maxTradeNotional: 200_000,
+      largeTradeNotional: 100_000,
+      navAgeSeconds: 12 * 60,
+      navMaxAgeSeconds: 48 * HOUR,
+      largeTradeMaxNavAgeSeconds: 6 * HOUR,
+      bandSynced: false,
+    },
     yieldPct: null,
     liquidity: 145_000,
     volume30d: 60_000,
@@ -219,9 +350,7 @@ export const mockAssets: TokenizedAsset[] = [
     totalSupply: 400_000,
     minInvestment: 50_000,
     requiredTiers: ['qualified_purchaser', 'institutional'],
-    marketStatus: 'open',
     rules: {
-      tradingWindow: 'Mon-Fri, 09:00-16:00 ET',
       lockupPeriodDays: 365,
       minHoldingPeriodDays: 180,
       maxOwnershipPct: 15,
@@ -240,6 +369,20 @@ export const mockAssets: TokenizedAsset[] = [
     startNav: 110,
     driftPerDay: 0.00035,
     volatility: 0.0035,
+    premiumBps: 45,
+    policy: {
+      // Paused by the issuer.
+      bandWidthBps: 250,
+      baseFeeBps: 15,
+      edgeFeeBps: 140,
+      directionalGuardBps: 100,
+      maxTradeNotional: 350_000,
+      largeTradeNotional: 150_000,
+      navAgeSeconds: 5 * HOUR,
+      navMaxAgeSeconds: 24 * HOUR,
+      largeTradeMaxNavAgeSeconds: 2 * HOUR,
+      paused: true,
+    },
     yieldPct: 6.4,
     liquidity: 268_000,
     volume30d: 90_000,
@@ -248,9 +391,7 @@ export const mockAssets: TokenizedAsset[] = [
     totalSupply: 3_200_000,
     minInvestment: 20_000,
     requiredTiers: ['accredited', 'qualified_purchaser', 'institutional'],
-    marketStatus: 'paused',
     rules: {
-      tradingWindow: 'Mon-Fri, 09:00-16:00 ET',
       lockupPeriodDays: 60,
       minHoldingPeriodDays: 30,
       maxOwnershipPct: 8,
@@ -269,6 +410,20 @@ export const mockAssets: TokenizedAsset[] = [
     startNav: 100,
     driftPerDay: 0.0002,
     volatility: 0.0015,
+    premiumBps: 25,
+    policy: {
+      // NAV has gone past its freshness limit, so the pool refuses every swap
+      // until the issuer publishes the next one.
+      bandWidthBps: 150,
+      baseFeeBps: 18,
+      edgeFeeBps: 130,
+      directionalGuardBps: 60,
+      maxTradeNotional: 200_000,
+      largeTradeNotional: 75_000,
+      navAgeSeconds: 9 * HOUR,
+      navMaxAgeSeconds: 6 * HOUR,
+      largeTradeMaxNavAgeSeconds: 2 * HOUR,
+    },
     yieldPct: 7.15,
     liquidity: 198_000,
     volume30d: 140_000,
@@ -277,9 +432,7 @@ export const mockAssets: TokenizedAsset[] = [
     totalSupply: 2_000_000,
     minInvestment: 10_000,
     requiredTiers: ['accredited', 'qualified_purchaser', 'institutional'],
-    marketStatus: 'restricted',
     rules: {
-      tradingWindow: 'Mon-Fri, 09:00-16:00 ET',
       lockupPeriodDays: 45,
       minHoldingPeriodDays: 30,
       maxOwnershipPct: 10,
@@ -298,6 +451,20 @@ export const mockAssets: TokenizedAsset[] = [
     startNav: 95,
     driftPerDay: 0.00028,
     volatility: 0.0045,
+    premiumBps: 330,
+    policy: {
+      // Price has drifted above the permitted range, which stops all trading
+      // until liquidity brings it back inside.
+      bandWidthBps: 250,
+      baseFeeBps: 14,
+      edgeFeeBps: 110,
+      directionalGuardBps: 90,
+      maxTradeNotional: 600_000,
+      largeTradeNotional: 250_000,
+      navAgeSeconds: 90 * 60,
+      navMaxAgeSeconds: 24 * HOUR,
+      largeTradeMaxNavAgeSeconds: 3 * HOUR,
+    },
     yieldPct: 6.1,
     liquidity: 402_000,
     volume30d: 310_000,
@@ -306,9 +473,7 @@ export const mockAssets: TokenizedAsset[] = [
     totalSupply: 4_000_000,
     minInvestment: 250_000,
     requiredTiers: ['institutional'],
-    marketStatus: 'open',
     rules: {
-      tradingWindow: 'Mon-Fri, 09:00-16:00 ET',
       lockupPeriodDays: 90,
       minHoldingPeriodDays: 60,
       maxOwnershipPct: 20,
@@ -323,5 +488,5 @@ export function getAssetById(id: string): TokenizedAsset | undefined {
 
 // "Trade" has no listing page of its own — it jumps straight into the most liquid open market.
 export function getDefaultTradeAsset(): TokenizedAsset {
-  return [...mockAssets].filter((asset) => asset.marketStatus === 'open').sort((a, b) => b.liquidity - a.liquidity)[0]!
+  return [...mockAssets].filter((asset) => poolCondition(asset) === 'open').sort((a, b) => b.liquidity - a.liquidity)[0]!
 }

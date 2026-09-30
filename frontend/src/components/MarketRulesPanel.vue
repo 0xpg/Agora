@@ -10,7 +10,6 @@ const props = defineProps<{
 
 const rows = computed<InfoRow[]>(() => [
   { label: 'Eligible Investor Tiers', value: props.requiredTiers.map((t) => ELIGIBILITY_TIER_LABEL[t]).join(', ') },
-  { label: 'Trading Window', value: props.rules.tradingWindow },
   { label: 'Lock-up Period', value: `${props.rules.lockupPeriodDays} days from issuance` },
   { label: 'Minimum Holding Period', value: `${props.rules.minHoldingPeriodDays} days` },
   { label: 'Maximum Ownership', value: `${props.rules.maxOwnershipPct}% of total supply per investor` },
@@ -19,5 +18,5 @@ const rows = computed<InfoRow[]>(() => [
 </script>
 
 <template>
-  <AssetInfoRows title="Issuer-Defined Market Rules" :rows="rows" />
+  <AssetInfoRows title="Issuer Holding &amp; Transfer Terms" :rows="rows" />
 </template>

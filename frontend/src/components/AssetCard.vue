@@ -3,7 +3,8 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { Investor, TokenizedAsset } from '@/types/market'
 import { eligibilityState, eligibilityReasonShort } from '@/composables/useEligibility'
-import { MARKET_STATUS_CONFIG } from '@/utils/statusConfig'
+import { poolCondition } from '@/utils/quote'
+import { POOL_CONDITION_CONFIG } from '@/utils/statusConfig'
 import { formatCurrency, formatPercent, formatRate } from '@/utils/format'
 import { premiumDiscountPct } from '@/utils/pricing'
 import PriceVsNavChart from '@/components/PriceVsNavChart.vue'
@@ -15,16 +16,18 @@ const props = defineProps<{
 }>()
 
 const state = computed(() => eligibilityState(props.asset, props.investor))
-const marketOpen = computed(() => props.asset.marketStatus === 'open')
-const tradable = computed(() => state.value === 'eligible' && marketOpen.value)
+const condition = computed(() => poolCondition(props.asset))
+const statusVisual = computed(() => POOL_CONDITION_CONFIG[condition.value])
+// One direction still trades under the rebalancing guard, so it is not a block.
+const poolOpen = computed(() => condition.value === 'open' || condition.value === 'rebalance_only')
+const tradable = computed(() => state.value === 'eligible' && poolOpen.value)
 const premium = computed(() => premiumDiscountPct(props.asset))
-const statusVisual = computed(() => MARKET_STATUS_CONFIG[props.asset.marketStatus])
 
-// Only surface a note when something actually blocks trading — an eligible,
-// open-market asset needs no extra text competing with the price.
+// Only surface a note when something actually limits trading — an eligible,
+// healthy pool needs no extra text competing with the price.
 const blockingNote = computed(() => {
-  if (!marketOpen.value) {
-    return { text: statusVisual.value.label, critical: props.asset.marketStatus === 'restricted' }
+  if (condition.value !== 'open') {
+    return { text: statusVisual.value.label, critical: condition.value === 'outside_band' }
   }
   if (state.value !== 'eligible') {
     return { text: eligibilityReasonShort(props.asset, props.investor), critical: state.value === 'restricted' }
@@ -46,7 +49,10 @@ const blockingNote = computed(() => {
         </div>
         <div class="truncate text-sm text-ink-secondary">{{ asset.name }}</div>
       </div>
-      <span class="text-xs font-medium text-success">AMM live</span>
+      <span class="flex shrink-0 items-center gap-1.5 text-xs font-medium" :class="statusVisual.text">
+        <span class="h-1.5 w-1.5 rounded-full" :class="statusVisual.dot" />
+        {{ statusVisual.label }}
+      </span>
     </div>
 
     <div class="flex flex-wrap items-center gap-1.5">

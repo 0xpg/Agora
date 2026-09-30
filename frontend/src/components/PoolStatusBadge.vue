@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { MarketStatus } from '@/types/market'
-import { MARKET_STATUS_CONFIG } from '@/utils/statusConfig'
+import type { TokenizedAsset } from '@/types/market'
+import { poolCondition } from '@/utils/quote'
+import { POOL_CONDITION_CONFIG } from '@/utils/statusConfig'
 
 const props = defineProps<{
-  status: MarketStatus
+  asset: TokenizedAsset
 }>()
 
-const config = computed(() => MARKET_STATUS_CONFIG[props.status])
+const config = computed(() => POOL_CONDITION_CONFIG[poolCondition(props.asset)])
 </script>
 
 <template>

@@ -1,12 +1,14 @@
 # Frontend integration
 
-Agora is an immediate-execution AMM built on Uniswap v4. The frontend must quote and swap through the permissioned router; direct `PoolManager` routes are unsupported because they do not establish the eligible end user.
+Agora is a NAV-anchored concentrated-liquidity AMM. Each market is one permissioned pool whose policy hook enforces a NAV-linked price range, a fee that scales with distance from NAV, per-swap size limits, NAV freshness, directional rebalancing, and an issuer pause.
+
+The frontend must quote and swap through the permissioned router; direct `PoolManager` routes are unsupported because they do not establish the eligible end user.
 
 ## Reads
 
 | UI value | Source |
 |---|---|
-| Pool price | v4 pool `slot0` converted from `sqrtPriceX96` |
+| Pool price | pool `slot0`, converted from `sqrtPriceX96` |
 | Reference NAV | `NAVOracle.getNAV()` |
 | NAV freshness | `NAVOracle.isStale()` |
 | Active band | `AgoraHook.lowerSqrtPriceX96()` / `upperSqrtPriceX96()` |
@@ -15,7 +17,7 @@ Agora is an immediate-execution AMM built on Uniswap v4. The frontend must quote
 | Inventory target and guard | `AgoraHook.targetSqrtPriceX96()` / `directionalGuardBps()` |
 | Trade limits | `AgoraHook.maxSwapAmount()` / `largeSwapAmount()` |
 | Eligibility | `AgoraAllowlistChecker.checkAllowlist(account, assetToken)` |
-| Liquidity and volume | indexed v4 pool data |
+| Liquidity and volume | indexed pool data |
 
 ## Swap flow
 
@@ -42,3 +44,13 @@ Both exact-input and exact-output swaps are subject to `maxSwapAmount`. At or be
 Issuer administration should be transferred to a Safe. For short-lived incidents, use `setTemporaryPolicy`; its bounds and fees stop applying at `expiresAt` without a cleanup transaction. Configure EAS tiers with `setTierPermissions`; the stock permissioned-pool integration supports separate swap and liquidity rights.
 
 Every NAV update invalidates the prior band automatically until step 4 completes.
+
+## Frontend state
+
+Quoting and policy evaluation live in `frontend/src/utils/quote.ts`, which mirrors the hook: the fee curve, the rebalancing guard and the range checks are computed on the square root of price, as the hook does, so a quote refuses exactly what a swap would revert on. `assessSwap` returns the quote alongside every reason the pool would refuse it, in the hook's own check order.
+
+Pool state is currently read from the fixture in `frontend/src/data/mockAssets.ts`, whose `PoolPolicy` shape matches the reads table above field for field. Replacing that fixture with live contract reads is the remaining wiring; nothing above it needs to change.
+
+Execution is stubbed. `frontend/src/composables/useSwapTransaction.ts` defines a `SwapExecutor` interface and ships one implementation, `createSimulatedExecutor`, which waits and reports success without touching a chain — the swap panel labels this plainly. A live executor implements the same interface against the permissioned router. Its `preflight` hook is where the between-quote-and-execution refusals belong; the panel already surfaces whatever it returns.
+
+Identity and compliance UI is deliberately minimal until that policy is finalized: the app shows the tier and verification an asset requires and whether the signed-in investor meets it, and does nothing more.

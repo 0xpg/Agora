@@ -5,17 +5,30 @@ import { getAssetById, getDefaultTradeAsset } from '@/data/mockAssets'
 import { mockInvestor } from '@/data/mockInvestor'
 import { ELIGIBILITY_TIER_LABEL } from '@/types/market'
 import { eligibilityState } from '@/composables/useEligibility'
+import { useNow } from '@/composables/useNow'
 import { premiumDiscountPct } from '@/utils/pricing'
-import { formatBps, formatCompactNumber, formatCurrency, formatMaturity, formatPercent, formatRate } from '@/utils/format'
-import MarketStatusBadge from '@/components/MarketStatusBadge.vue'
+import { activePolicy, feeBpsAt } from '@/utils/quote'
+import {
+  formatAge,
+  formatBps,
+  formatCompactNumber,
+  formatCurrency,
+  formatMaturity,
+  formatPercent,
+  formatRate,
+} from '@/utils/format'
+import PoolStatusBadge from '@/components/PoolStatusBadge.vue'
 import EligibilityBadge from '@/components/EligibilityBadge.vue'
 import MarketRulesPanel from '@/components/MarketRulesPanel.vue'
+import PoolPolicyPanel from '@/components/PoolPolicyPanel.vue'
+import PriceBandMeter from '@/components/PriceBandMeter.vue'
 import PriceVsNavChart from '@/components/PriceVsNavChart.vue'
 import SummaryMetrics, { type MetricItem } from '@/components/SummaryMetrics.vue'
 import AssetInfoRows, { type InfoRow } from '@/components/AssetInfoRows.vue'
 import SwapPanel from '@/components/SwapPanel.vue'
 
 const route = useRoute()
+const now = useNow(1000)
 const requestedAsset = computed(() => (route.params.id ? getAssetById(String(route.params.id)) : undefined))
 const notFound = computed(() => Boolean(route.params.id) && !requestedAsset.value)
 const asset = computed(() => requestedAsset.value ?? getDefaultTradeAsset())
@@ -23,6 +36,10 @@ const investor = computed(() => mockInvestor)
 
 const eligibility = computed(() => eligibilityState(asset.value, investor.value))
 const premium = computed(() => premiumDiscountPct(asset.value))
+
+// Where the swap panel's live quote would leave the pool price, drawn onto the
+// range meter so the trade and the policy are read together.
+const quotedPrice = ref<number | undefined>(undefined)
 
 const TIMEFRAMES = [
   { label: '1M', days: 30 },
@@ -41,10 +58,10 @@ const priceSeries = computed(() => {
   return Number.isFinite(days) ? asset.value.priceHistory.slice(-days) : asset.value.priceHistory
 })
 
-const lastNavUpdate = computed(() => {
-  const point = asset.value.navHistory[asset.value.navHistory.length - 1]
-  if (!point) return ''
-  return new Date(point.time * 1000).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+const navAge = computed(() => Math.max(now.value - asset.value.policy.navUpdatedAt, 0))
+const currentFee = computed(() => {
+  const active = activePolicy(asset.value.policy, now.value)
+  return feeBpsAt(asset.value.lastPrice, active, asset.value.policy.targetPrice)
 })
 
 const priceMetrics = computed<MetricItem[]>(() => [
@@ -54,12 +71,21 @@ const priceMetrics = computed<MetricItem[]>(() => [
     inlineNote: formatPercent(asset.value.change24hPct),
     inlineNoteClass: asset.value.change24hPct >= 0 ? 'text-success' : 'text-critical',
   },
-  { label: 'Reference NAV', value: formatCurrency(asset.value.nav, asset.value.currency) },
+  {
+    label: 'Reference NAV',
+    value: formatCurrency(asset.value.nav, asset.value.currency),
+    caption: `Published ${formatAge(navAge.value)}`,
+  },
   {
     label: 'Premium',
     value: formatBps(premium.value),
     valueClass: premium.value >= 0 ? 'text-success' : 'text-critical',
     inlineNote: premium.value >= 0 ? 'Premium' : 'Discount',
+  },
+  {
+    label: 'Fee Now',
+    value: `${currentFee.value.toFixed(1)} bps`,
+    caption: 'Rises away from NAV',
   },
 ])
 
@@ -73,7 +99,7 @@ const infoRows = computed<InfoRow[]>(() => [
   { label: 'Issuer', value: asset.value.issuer },
   { label: 'Domicile', value: asset.value.domicile },
   { label: 'Yield', value: formatRate(asset.value.yieldPct) },
-  { label: 'Liquidity', value: formatCurrency(asset.value.liquidity, asset.value.currency, 0) },
+  { label: 'Pool Liquidity', value: formatCurrency(asset.value.liquidity, asset.value.currency, 0) },
   { label: 'Maturity', value: formatMaturity(asset.value.maturityDate) },
   {
     label: 'Eligibility',
@@ -91,8 +117,8 @@ const infoRows = computed<InfoRow[]>(() => [
     </div>
 
     <template v-else>
-      <div class="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-        <RouterLink to="/markets" class="hover:text-ink">Agora DEX</RouterLink>
+      <div class="mb-1 flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-ink-muted uppercase">
+        <RouterLink to="/markets" class="hover:text-ink">Agora</RouterLink>
         <span>/</span>
         <RouterLink to="/trade" class="hover:text-ink">Trade</RouterLink>
         <span>/</span>
@@ -105,11 +131,11 @@ const infoRows = computed<InfoRow[]>(() => [
       </div>
 
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div class="lg:col-span-1">
-          <SwapPanel :asset="asset" :investor="investor" />
+        <div class="lg:col-span-1 lg:order-2">
+          <SwapPanel :asset="asset" :investor="investor" @update:post-swap-price="quotedPrice = $event" />
         </div>
 
-        <div class="lg:col-span-2">
+        <div class="lg:col-span-2 lg:order-1">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div class="flex items-center gap-3">
               <span
@@ -126,12 +152,12 @@ const infoRows = computed<InfoRow[]>(() => [
                 <span
                   class="mt-1 inline-block rounded-full border border-hairline px-2 py-0.5 text-[10px] font-medium text-ink-secondary"
                 >
-                  {{ asset.poolType === 'nav_managed' ? 'NAV-managed' : 'Standard pool' }}
+                  {{ asset.poolType === 'nav_managed' ? 'NAV-managed pool' : 'Standard pool' }}
                 </span>
               </div>
             </div>
             <div class="flex flex-wrap items-center gap-2">
-              <MarketStatusBadge :status="asset.marketStatus" />
+              <PoolStatusBadge :asset="asset" />
               <div class="flex rounded-md border border-hairline p-0.5 text-xs">
                 <button
                   v-for="tf in TIMEFRAMES"
@@ -149,12 +175,16 @@ const infoRows = computed<InfoRow[]>(() => [
 
           <SummaryMetrics :metrics="priceMetrics" class="mt-4" />
 
+          <PriceBandMeter :asset="asset" :post-swap-price="quotedPrice" class="mt-4" />
+
           <div class="mt-4 rounded-lg border border-hairline bg-surface p-5">
             <div class="h-72">
               <PriceVsNavChart :nav-series="navSeries" :price-series="priceSeries" />
             </div>
-            <p class="mt-2 text-right text-xs text-ink-muted">NAV history as of {{ lastNavUpdate }}</p>
+            <p class="mt-2 text-right text-xs text-ink-muted">Pool price against reference NAV</p>
           </div>
+
+          <PoolPolicyPanel :asset="asset" class="mt-4" />
 
           <AssetInfoRows :rows="infoRows" class="mt-4" />
 

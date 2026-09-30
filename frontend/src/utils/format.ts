@@ -40,6 +40,20 @@ export function truncateAddress(address: string, lead = 5, trail = 4): string {
   return `${address.slice(0, lead)}...${address.slice(-trail)}`
 }
 
+/** A policy window or an age, as the shortest phrase that stays exact. */
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.max(Math.round(seconds), 0)} sec`
+  const minutes = seconds / 60
+  if (minutes < 90) return `${Math.round(minutes)} min`
+  const hours = minutes / 60
+  if (hours < 48) return `${Number(hours.toFixed(hours % 1 === 0 ? 0 : 1))} hr`
+  return `${Math.round(hours / 24)} days`
+}
+
+export function formatAge(seconds: number): string {
+  return `${formatDuration(seconds)} ago`
+}
+
 export function formatMaturity(date: string | null): string {
   if (!date) return 'Perpetual'
   return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })

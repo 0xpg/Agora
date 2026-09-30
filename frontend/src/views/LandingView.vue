@@ -6,6 +6,7 @@ import { mockInvestor } from '@/data/mockInvestor'
 import { useWalletStore } from '@/stores/wallet'
 import { TARGET_CHAIN_NAME } from '@/config/chain'
 import { premiumDiscountPct } from '@/utils/pricing'
+import { poolCondition } from '@/utils/quote'
 import { formatBps, formatCurrency, formatPercent } from '@/utils/format'
 import AssetCard from '@/components/AssetCard.vue'
 import AppFooter from '@/components/layout/AppFooter.vue'
@@ -26,8 +27,8 @@ const VALUE_PROPS = [
     body: "See how each asset's market price compares to its reference NAV, with full price history alongside it.",
   },
   {
-    title: 'NAV-Guarded AMM',
-    body: 'Swaps execute immediately while the Agora hook keeps price inside the issuer-defined NAV band.',
+    title: 'NAV-Anchored Liquidity',
+    body: 'Swaps settle the moment you confirm them, with liquidity concentrated around NAV and fees that rise as price moves away from it.',
   },
 ] as const
 
@@ -42,11 +43,11 @@ const HOW_IT_WORKS = [
   },
   {
     title: 'Review the live quote',
-    body: 'Choose an amount and review the pool price, NAV, fee, and expected output.',
+    body: 'Enter what you want to pay or what you want to receive. Every quote shows the fee, the price impact, and where the trade would leave the pool price.',
   },
   {
-    title: 'Get your settlement or refund',
-    body: 'Approve and swap. The transaction reverts if eligibility, NAV freshness, slippage, or the price band check fails.',
+    title: 'Swap and settle immediately',
+    body: 'Approve once, then confirm. There is no waiting period — and rather than fill you outside the issuer’s permitted range, the pool refuses the swap.',
   },
 ] as const
 
@@ -61,7 +62,7 @@ const HEADLINE_WORDS = ['Real-world', 'assets,', 'made', 'discoverable', 'and'] 
 // a restricted card here doubles as a preview of the "Verified Access" idea.
 const previewAssets = computed(() =>
   [...mockAssets]
-    .filter((asset) => asset.marketStatus === 'open')
+    .filter((asset) => poolCondition(asset) === 'open')
     .sort((a, b) => b.liquidity - a.liquidity)
     .slice(0, 3),
 )
