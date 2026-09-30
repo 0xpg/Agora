@@ -71,6 +71,8 @@ The Vue frontend uses Privy for wallet onboarding. Agora Demo Note executes agai
 
 Canonical machine-readable deployment data lives in [`config/markets.json`](config/markets.json).
 
+The deployed source is published through Sourcify. A successful end-to-end ADN swap is recorded in [BaseScan transaction `0xea1517…75c34`](https://sepolia.basescan.org/tx/0xea1517f3c9aad4851b2e750a18f129440a29970f1c233dd66ba821a335075c34), including the pool `Swap` and token `Transfer` events. Reproduce it with `script/SmokeSwap.s.sol`.
+
 ## Before production
 
 - Replace the demo liquidity and swap routers with production routers.
