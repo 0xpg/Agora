@@ -14,6 +14,7 @@ NAV-anchored adaptive liquidity for secondary markets in tokenized real-world as
 
 ```text
 Privy wallet -> swap router -> singleton pool manager -> policy hook
+Base Sepolia events -> Cloudflare Worker indexer -> D1 -> read-only API
 ```
 
 | Component | Responsibility |
@@ -24,6 +25,7 @@ Privy wallet -> swap router -> singleton pool manager -> policy hook
 | `IdentityRegistry` | Issuer-managed demo access list for Privy wallets |
 | `MarketFactory` | Deploys the contracts for a new market |
 | Privy | Wallet and email onboarding |
+| Cloudflare Worker + D1 | Resumable trade, risk, and NAV event index for the frontend |
 
 Privy handles onboarding. For the hackathon demo, wallets self-register on-chain and can mint demo settlement tokens during their first trade; external identity attestations are intentionally out of scope.
 
@@ -55,6 +57,8 @@ git submodule update --init --recursive
 CI runs `forge fmt --check`, `forge build --sizes`, and `forge test -vvv`.
 
 The Vue frontend uses Privy for wallet onboarding. Agora Demo Note executes against the deployed Base Sepolia swap router; the other showcase markets use representative data.
+
+The read-only demo API is available at [`agora.0xpg.workers.dev/api/market`](https://agora.0xpg.workers.dev/api/market), with trade history at `/api/trades`, transaction lookup at `/api/trades/:hash`, risk events at `/api/risk`, and NAV history at `/api/nav`. Indexing runs every minute from the deployment block and resumes from its D1 cursor.
 
 ## Base Sepolia deployment
 

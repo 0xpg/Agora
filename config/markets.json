@@ -2,6 +2,7 @@
   "84532": [
     {
       "id": "agora-demo-note",
+      "deploymentBlock": 47527493,
       "name": "Agora Demo Note",
       "symbol": "ADN",
       "assetToken": "0x6985ae688BcCeB88D00aaf07e3bFB49e6BFfa1e6",
