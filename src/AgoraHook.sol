@@ -10,7 +10,7 @@ import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -23,6 +23,7 @@ import {NAVOracle} from "./NAVOracle.sol";
 contract AgoraHook is IHooks, Ownable2Step {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
+    using BalanceDeltaLibrary for BalanceDelta;
 
     IPoolManager public immutable poolManager;
     NAVOracle public immutable navOracle;
@@ -40,6 +41,22 @@ contract AgoraHook is IHooks, Ownable2Step {
     uint256 public largeSwapAmount;
     uint64 public largeSwapMaxStaleness;
     bool public paused;
+
+    struct FlowRisk {
+        uint64 epochDuration;
+        uint64 epochStart;
+        uint128 grossLimit;
+        uint128 netLimit;
+        uint128 grossFlow;
+        int128 netAssetFlow;
+        uint24 inventoryFeeMax;
+        uint24 volatilityFeeMax;
+        uint16 inventoryDeadBandBps;
+        bool assetIsCurrency0;
+        uint160 lastSqrtPriceX96;
+    }
+
+    FlowRisk public flowRisk;
 
     struct TemporaryPolicy {
         uint160 lowerSqrtPriceX96;
@@ -62,6 +79,27 @@ contract AgoraHook is IHooks, Ownable2Step {
         uint64 largeSwapMaxStaleness
     );
     event TemporaryPolicyUpdated(uint160 lower, uint160 upper, uint24 baseFee, uint24 edgeFee, uint64 expiresAt);
+    event FlowRiskUpdated(
+        uint64 epochDuration,
+        uint128 grossLimit,
+        uint128 netLimit,
+        uint24 inventoryFeeMax,
+        uint24 volatilityFeeMax,
+        uint16 inventoryDeadBandBps,
+        bool assetIsCurrency0
+    );
+    event SwapRiskEvaluated(
+        bool indexed zeroForOne,
+        int256 amountSpecified,
+        uint24 navFee,
+        uint24 inventoryFee,
+        uint24 volatilityFee,
+        uint24 totalFee,
+        uint128 epochGrossFlow,
+        int128 epochNetAssetFlow,
+        uint64 navUpdatedAt
+    );
+    event FlowRecorded(uint128 assetAmount, int128 netAssetFlow, uint128 grossFlow, uint64 epochStart);
 
     error NotPoolManager();
     error WrongPool();
@@ -71,6 +109,8 @@ contract AgoraHook is IHooks, Ownable2Step {
     error SwapsPaused();
     error SwapTooLarge();
     error RebalanceOnly();
+    error EpochGrossLimitExceeded();
+    error EpochNetLimitExceeded();
 
     modifier onlyPoolManager() {
         if (msg.sender != address(poolManager)) revert NotPoolManager();
@@ -163,9 +203,46 @@ contract AgoraHook is IHooks, Ownable2Step {
                 && expiresAt > block.timestamp,
             "bad temporary policy"
         );
-        require(_baseFee <= _edgeFee && _edgeFee <= LPFeeLibrary.MAX_LP_FEE, "bad fees");
+        require(
+            _baseFee <= _edgeFee
+                && uint256(_edgeFee) + flowRisk.inventoryFeeMax + flowRisk.volatilityFeeMax <= LPFeeLibrary.MAX_LP_FEE,
+            "bad fees"
+        );
         temporaryPolicy = TemporaryPolicy(lower, upper, _baseFee, _edgeFee, expiresAt);
         emit TemporaryPolicyUpdated(lower, upper, _baseFee, _edgeFee, expiresAt);
+    }
+
+    function setFlowRisk(
+        uint64 epochDuration,
+        uint128 grossLimit,
+        uint128 netLimit,
+        uint24 inventoryFeeMax,
+        uint24 volatilityFeeMax,
+        uint16 inventoryDeadBandBps,
+        bool assetIsCurrency0
+    ) external onlyOwner {
+        require(epochDuration != 0 && netLimit <= grossLimit, "bad flow limits");
+        require(inventoryDeadBandBps <= 10_000, "bad dead band");
+        require(uint256(edgeFee) + inventoryFeeMax + volatilityFeeMax <= LPFeeLibrary.MAX_LP_FEE, "fee overflow");
+        flowRisk.epochDuration = epochDuration;
+        flowRisk.epochStart = uint64(block.timestamp - (block.timestamp % epochDuration));
+        flowRisk.grossLimit = grossLimit;
+        flowRisk.netLimit = netLimit;
+        flowRisk.grossFlow = 0;
+        flowRisk.netAssetFlow = 0;
+        flowRisk.inventoryFeeMax = inventoryFeeMax;
+        flowRisk.volatilityFeeMax = volatilityFeeMax;
+        flowRisk.inventoryDeadBandBps = inventoryDeadBandBps;
+        flowRisk.assetIsCurrency0 = assetIsCurrency0;
+        emit FlowRiskUpdated(
+            epochDuration,
+            grossLimit,
+            netLimit,
+            inventoryFeeMax,
+            volatilityFeeMax,
+            inventoryDeadBandBps,
+            assetIsCurrency0
+        );
     }
 
     function beforeInitialize(address, PoolKey calldata key, uint160 sqrtPriceX96)
@@ -190,23 +267,36 @@ contract AgoraHook is IHooks, Ownable2Step {
         uint256 amount = _absolute(params.amountSpecified);
         if (maxSwapAmount != 0 && amount > maxSwapAmount) revert SwapTooLarge();
         _checkNAV(amount);
+        _rollEpoch();
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
         _checkPrice(sqrtPriceX96);
         _checkDirection(sqrtPriceX96, params.zeroForOne);
-        return (
-            IHooks.beforeSwap.selector,
-            BeforeSwapDeltaLibrary.ZERO_DELTA,
-            _feeAt(sqrtPriceX96) | LPFeeLibrary.OVERRIDE_FEE_FLAG
+        (uint24 navFee, uint24 inventoryFee, uint24 volatilityFee, uint24 totalFee) =
+            feeBreakdown(sqrtPriceX96, params.zeroForOne);
+        (, uint64 navUpdatedAt) = navOracle.getNAV();
+        emit SwapRiskEvaluated(
+            params.zeroForOne,
+            params.amountSpecified,
+            navFee,
+            inventoryFee,
+            volatilityFee,
+            totalFee,
+            flowRisk.grossFlow,
+            flowRisk.netAssetFlow,
+            navUpdatedAt
         );
+        return
+            (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, totalFee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
     }
 
-    function afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
+    function afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta delta, bytes calldata)
         external
         onlyPoolManager
         returns (bytes4, int128)
     {
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
         _checkPrice(sqrtPriceX96);
+        _recordFlow(delta, sqrtPriceX96);
         return (IHooks.afterSwap.selector, 0);
     }
 
@@ -236,13 +326,52 @@ contract AgoraHook is IHooks, Ownable2Step {
         if (sqrtPriceX96 < lower || sqrtPriceX96 > upper) revert PriceOutsideBand();
     }
 
-    function _feeAt(uint160 price) private view returns (uint24) {
+    function feeBreakdown(uint160 price, bool zeroForOne)
+        public
+        view
+        returns (uint24 navFee, uint24 inventoryFee, uint24 volatilityFee, uint24 totalFee)
+    {
+        navFee = _navFee(price);
+        inventoryFee = _inventoryFee(zeroForOne);
+        volatilityFee = _volatilityFee(price);
+        totalFee = navFee + inventoryFee + volatilityFee;
+    }
+
+    function _navFee(uint160 price) private view returns (uint24) {
         (uint160 lower, uint160 upper, uint24 activeBaseFee, uint24 activeEdgeFee) = activePolicy();
         uint256 midpoint = targetSqrtPriceX96 == 0 ? (uint256(lower) + upper) / 2 : targetSqrtPriceX96;
         uint256 distance = price > midpoint ? price - midpoint : midpoint - price;
         uint256 span = price > midpoint ? upper - midpoint : midpoint - lower;
         if (distance > span) distance = span;
         return activeBaseFee + uint24((uint256(activeEdgeFee - activeBaseFee) * distance) / span);
+    }
+
+    function _inventoryFee(bool zeroForOne) private view returns (uint24) {
+        FlowRisk memory risk = flowRisk;
+        bool addsAsset = risk.assetIsCurrency0 == zeroForOne;
+        bool worsensImbalance = (risk.netAssetFlow > 0 && addsAsset) || (risk.netAssetFlow < 0 && !addsAsset);
+        uint256 absNet = risk.netAssetFlow < 0
+            ? uint256(uint128(-(risk.netAssetFlow + 1))) + 1
+            : uint256(uint128(risk.netAssetFlow));
+        uint256 deadBand = uint256(risk.netLimit) * risk.inventoryDeadBandBps / 10_000;
+        if (worsensImbalance && risk.netLimit != 0 && absNet > deadBand) {
+            uint256 chargeable = absNet - deadBand;
+            uint256 range = uint256(risk.netLimit) - deadBand;
+            if (chargeable > range) chargeable = range;
+            return uint24(uint256(risk.inventoryFeeMax) * chargeable / range);
+        }
+        return 0;
+    }
+
+    function _volatilityFee(uint160 price) private view returns (uint24) {
+        FlowRisk memory risk = flowRisk;
+        if (risk.lastSqrtPriceX96 != 0 && risk.volatilityFeeMax != 0) {
+            uint256 move = price > risk.lastSqrtPriceX96 ? price - risk.lastSqrtPriceX96 : risk.lastSqrtPriceX96 - price;
+            uint256 moveBps = move * 10_000 / risk.lastSqrtPriceX96;
+            if (moveBps > 10_000) moveBps = 10_000;
+            return uint24(uint256(risk.volatilityFeeMax) * moveBps / 10_000);
+        }
+        return 0;
     }
 
     function activePolicy()
@@ -269,10 +398,44 @@ contract AgoraHook is IHooks, Ownable2Step {
     }
 
     function _setFees(uint24 _baseFee, uint24 _edgeFee) private {
-        require(_baseFee <= _edgeFee && _edgeFee <= LPFeeLibrary.MAX_LP_FEE, "bad fees");
+        require(
+            _baseFee <= _edgeFee
+                && uint256(_edgeFee) + flowRisk.inventoryFeeMax + flowRisk.volatilityFeeMax <= LPFeeLibrary.MAX_LP_FEE,
+            "bad fees"
+        );
         baseFee = _baseFee;
         edgeFee = _edgeFee;
         emit FeesUpdated(_baseFee, _edgeFee);
+    }
+
+    function _rollEpoch() private {
+        FlowRisk storage risk = flowRisk;
+        if (risk.epochDuration == 0) return;
+        uint64 start = uint64(block.timestamp - (block.timestamp % risk.epochDuration));
+        if (start != risk.epochStart) {
+            risk.epochStart = start;
+            risk.grossFlow = 0;
+            risk.netAssetFlow = 0;
+        }
+    }
+
+    function _recordFlow(BalanceDelta delta, uint160 price) private {
+        FlowRisk storage risk = flowRisk;
+        risk.lastSqrtPriceX96 = price;
+        if (risk.epochDuration == 0) return;
+        int128 callerAssetDelta = risk.assetIsCurrency0 ? delta.amount0() : delta.amount1();
+        int256 poolAssetDelta = -int256(callerAssetDelta);
+        uint256 amount = poolAssetDelta < 0 ? uint256(-poolAssetDelta) : uint256(poolAssetDelta);
+        uint256 gross = uint256(risk.grossFlow) + amount;
+        int256 net = int256(risk.netAssetFlow) + poolAssetDelta;
+        if (risk.grossLimit != 0 && gross > risk.grossLimit) revert EpochGrossLimitExceeded();
+        if (risk.netLimit != 0 && (net > int256(uint256(risk.netLimit)) || net < -int256(uint256(risk.netLimit)))) {
+            revert EpochNetLimitExceeded();
+        }
+        require(gross <= type(uint128).max && net <= type(int128).max && net >= type(int128).min, "flow overflow");
+        risk.grossFlow = uint128(gross);
+        risk.netAssetFlow = int128(net);
+        emit FlowRecorded(uint128(amount), risk.netAssetFlow, risk.grossFlow, risk.epochStart);
     }
 
     function afterInitialize(address, PoolKey calldata, uint160, int24) external pure returns (bytes4) {

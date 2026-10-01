@@ -5,9 +5,10 @@ NAV-anchored adaptive liquidity for tokenized real-world assets.
 Agora is a concentrated-liquidity AMM with issuer-defined market controls. Its policy hook provides:
 
 - a NAV-linked trading range;
-- dynamic fees around a target price;
+- dynamic fees based on NAV deviation, one-sided inventory flow, and short-term price movement;
 - directional rebalancing when the pool moves outside its target zone;
-- per-swap limits and stricter NAV freshness for large trades;
+- per-swap and cumulative epoch limits that prevent split-trade bypasses;
+- delayed, jump-limited NAV updates;
 - issuer pause controls; and
 - temporary emergency parameters with automatic expiry.
 
@@ -30,9 +31,11 @@ Privy handles onboarding. For the hackathon demo, wallets self-register on-chain
 
 ## Market controls
 
-After publishing NAV, the issuer calls `syncPriceBand` with decimal-aware Q64.96 square-root price bounds. A new NAV invalidates the previous band until this synchronization is complete.
+The initial NAV is published directly. Later values use `scheduleNAV` and `activateNAV`; the issuer configures the activation delay and maximum permitted change with `setUpdatePolicy`. Every activated NAV invalidates the old price band until the issuer calls `syncPriceBand` with decimal-aware Q64.96 square-root price bounds.
 
-`setRiskControls` configures the target price, directional guard, maximum swap amount, and the tighter freshness requirement for large swaps. `setTemporaryPolicy` applies short-lived bounds and fees that expire without a cleanup transaction.
+`setRiskControls` configures the target price, directional guard, maximum swap amount, and tighter freshness requirement for large swaps. `setFlowRisk` adds gross and directional net-flow budgets per epoch. Trades that worsen accumulated inventory imbalance pay an additional fee, while rebalancing trades do not. A bounded movement fee responds to the price change since the previous swap. `setTemporaryPolicy` applies short-lived bounds and fees that expire without a cleanup transaction.
+
+`SwapRiskEvaluated` exposes the fee components, NAV timestamp, and current epoch utilization. `FlowRecorded` records the actual asset amount after settlement; limits therefore apply to executed output rather than user-supplied quote data.
 
 Issuer ownership should be transferred to a Safe before production use.
 
@@ -56,6 +59,8 @@ CI runs `forge fmt --check`, `forge build --sizes`, and `forge test -vvv`.
 The Vue frontend uses Privy for wallet onboarding. Agora Demo Note executes against the deployed Base Sepolia swap router; the other showcase markets use representative data.
 
 ## Base Sepolia deployment
+
+The addresses below run the original demo policy. The expanded flow-risk and staged-NAV contracts require a new deployment.
 
 | Contract | Address |
 |---|---|

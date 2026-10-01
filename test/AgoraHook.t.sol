@@ -10,6 +10,7 @@ import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {HookMiner} from "@uniswap/v4-periphery/test/shared/HookMiner.sol";
 
@@ -40,6 +41,7 @@ contract AgoraHookTest is Test {
 
         hook.syncPriceBand(PRICE * 90 / 100, PRICE * 110 / 100);
         hook.setRiskControls(PRICE, 500, 1_000, 500, 1 hours);
+        hook.setFlowRisk(1 hours, 1_000, 600, 2_000, 1_000, 1_000, true);
         key = PoolKey(currency0, currency1, LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, IHooks(address(hook)));
     }
 
@@ -77,6 +79,27 @@ contract AgoraHookTest is Test {
         vm.prank(address(manager));
         vm.expectRevert(AgoraHook.StaleNAV.selector);
         hook.beforeSwap(address(0), key, _params(true, -500), "");
+    }
+
+    function test_FlowLimitsCannotBeBypassedBySplitSwaps() public {
+        vm.startPrank(address(manager));
+        hook.afterSwap(address(0), key, _params(true, -400), _delta(-400, 400), "");
+        vm.expectRevert(AgoraHook.EpochNetLimitExceeded.selector);
+        hook.afterSwap(address(0), key, _params(true, -201), _delta(-201, 201), "");
+        vm.stopPrank();
+    }
+
+    function test_InventoryFeeOnlyPenalizesWorseningDirection() public {
+        vm.prank(address(manager));
+        hook.afterSwap(address(0), key, _params(true, -400), _delta(-400, 400), "");
+        (, uint24 worsening,,) = hook.feeBreakdown(PRICE, true);
+        (, uint24 rebalancing,,) = hook.feeBreakdown(PRICE, false);
+        assertGt(worsening, 0);
+        assertEq(rebalancing, 0);
+    }
+
+    function _delta(int128 amount0, int128 amount1) private pure returns (BalanceDelta) {
+        return BalanceDelta.wrap((int256(amount0) << 128) | int256(uint256(uint128(amount1))));
     }
 
     function _params(bool zeroForOne, int256 amount) private pure returns (SwapParams memory) {

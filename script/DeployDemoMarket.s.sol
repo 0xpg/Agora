@@ -39,6 +39,7 @@ contract DeployDemoMarket is Script {
         token.acceptOwnership();
         registry.setEligibility(issuer, 1);
         oracle.setNAV(1 ether);
+        oracle.setUpdatePolicy(15 minutes, 500);
 
         _deployPool(issuer, token, settlement, oracle);
 
@@ -66,6 +67,15 @@ contract DeployDemoMarket is Script {
 
         hook.syncPriceBand(PRICE * 95 / 100, PRICE * 105 / 100);
         hook.setRiskControls(PRICE, 250, 10_000 ether, 5_000 ether, 1 hours);
+        hook.setFlowRisk(
+            1 hours,
+            20_000 ether,
+            10_000 ether,
+            2_500,
+            1_000,
+            1_000,
+            Currency.unwrap(assetCurrency) == Currency.unwrap(currency0)
+        );
 
         PoolKey memory key = PoolKey(currency0, currency1, LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, IHooks(address(hook)));
         manager.initialize(key, PRICE);
