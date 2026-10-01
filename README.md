@@ -1,8 +1,6 @@
 # Agora
 
-NAV-anchored adaptive liquidity for secondary markets in tokenized real-world assets.
-
-Agora is a concentrated-liquidity AMM with issuer-defined market controls. Its policy hook provides:
+NAV-anchored adaptive liquidity for secondary markets in tokenized real-world assets. Agora is a concentrated-liquidity AMM with issuer-defined market controls. Its policy hook provides:
 
 - a NAV-linked trading range;
 - dynamic fees based on NAV deviation, one-sided inventory flow, and short-term price movement;
