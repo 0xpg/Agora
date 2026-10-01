@@ -1,11 +1,11 @@
 {
   "84532": {
     "chainName": "baseSepolia",
-    "settlementToken": "0xEb9EaC3f9Ec57632CDFDE23D55716c2EA2Fa3a99",
+    "settlementToken": "0x28d1ed434444653FEa153c3d0d412464ed9B6d1D",
     "identityRegistryFactory": "0x16d8c4893aFaF16862F96C034Ade5705209DdD10",
     "navOracleFactory": "0x8eA7A7eBdf69B08435c8371f23c5c25b87cFEA8D",
     "assetTokenFactory": "0x1dc321648D9e9e2eF30a935986A288Ee4Dd45ddc",
-    "poolManager": "0xb528D4cBB72A86bA7CDbc42100ca24a8283be8E3",
+    "poolManager": "0xBdd5c751AED5c22ef3CcEDC59d63F67c15f886d8",
     "marketFactory": "0x309941F55DB597C05D0A9628aDeFD7ff05C10e2d",
     "markets": ["agora-demo-note"]
   }

@@ -2,11 +2,11 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
-import {MarketFactory} from "../src/MarketFactory.sol";
 import {PermissionedAssetToken} from "../src/PermissionedAssetToken.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {NAVOracle} from "../src/NAVOracle.sol";
 import {AgoraHook} from "../src/AgoraHook.sol";
+import {AgoraAllowlistChecker} from "../src/AgoraAllowlistChecker.sol";
 import {DemoSettlementToken} from "../src/DemoSettlementToken.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -21,7 +21,6 @@ import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {HookMiner} from "@uniswap/v4-periphery/test/shared/HookMiner.sol";
 
 contract DeployDemoMarket is Script {
-    address private constant MARKET_FACTORY = 0x309941F55DB597C05D0A9628aDeFD7ff05C10e2d;
     address private constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
     uint160 private constant PRICE = 1 << 96;
 
@@ -30,13 +29,10 @@ contract DeployDemoMarket is Script {
         vm.startBroadcast();
 
         DemoSettlementToken settlement = new DemoSettlementToken();
-        (address tokenAddress, address oracleAddress, address registryAddress,) =
-            MarketFactory(MARKET_FACTORY).deployMarket("Agora Demo Note", "ADN", 1 days);
-
-        PermissionedAssetToken token = PermissionedAssetToken(tokenAddress);
-        NAVOracle oracle = NAVOracle(oracleAddress);
-        IdentityRegistry registry = IdentityRegistry(registryAddress);
-        token.acceptOwnership();
+        IdentityRegistry registry = new IdentityRegistry(issuer);
+        NAVOracle oracle = new NAVOracle(issuer, 1 days);
+        PermissionedAssetToken token = new PermissionedAssetToken("Agora Demo Note", "ADN", issuer, address(registry));
+        AgoraAllowlistChecker allowlist = new AgoraAllowlistChecker(address(token), registry, issuer);
         registry.setEligibility(issuer, 1);
         oracle.setNAV(1 ether);
         oracle.setUpdatePolicy(15 minutes, 500);
@@ -45,10 +41,11 @@ contract DeployDemoMarket is Script {
 
         vm.stopBroadcast();
 
-        console.log("Asset token:", tokenAddress);
+        console.log("Asset token:", address(token));
         console.log("Settlement token:", address(settlement));
-        console.log("Identity registry:", registryAddress);
-        console.log("NAV oracle:", oracleAddress);
+        console.log("Identity registry:", address(registry));
+        console.log("NAV oracle:", address(oracle));
+        console.log("Allowlist checker:", address(allowlist));
     }
 
     function _deployPool(address issuer, PermissionedAssetToken token, DemoSettlementToken settlement, NAVOracle oracle)
